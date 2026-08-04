@@ -1,0 +1,21 @@
+server:
+  addr: ":8080"
+mysql:
+  dsn: "root:root123@tcp(127.0.0.1:3306)/xhs?charset=utf8mb4&parseTime=True&loc=Local"
+redis:
+  addr: "127.0.0.1:6379"
+  password: ""
+  db: 0
+rabbitmq:
+  url: "amqp://guest:guest@127.0.0.1:5672/"
+minio:
+  endpoint: "127.0.0.1:9000"
+  access_key: "minioadmin"
+  secret_key: "minioadmin"
+  bucket: "xhs-images"
+  use_ssl: false
+jwt:
+  secret: "dev-secret-change-me"
+  expire_hours: 72
+snowflake:
+  node: 1
