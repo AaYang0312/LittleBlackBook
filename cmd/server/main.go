@@ -4,11 +4,15 @@ import (
 	"log/slog"
 	"os"
 	"time"
+	"xbs/internal/note"
 	"xbs/internal/pkg/config"
 	"xbs/internal/pkg/db"
 	"xbs/internal/pkg/errs"
 	"xbs/internal/pkg/middleware"
+	"xbs/internal/pkg/mq"
 	"xbs/internal/pkg/response"
+	"xbs/internal/pkg/snowflake"
+	"xbs/internal/pkg/storage"
 	"xbs/internal/user"
 
 	"github.com/gin-gonic/gin"
@@ -47,4 +51,21 @@ func main() {
 	if err := r.Run(cfg.Server.Addr); err != nil {
 		slog.Error("server exit", "err", err)
 	}
+	m, err := mq.New(cfg.RabbitMQ.URL)
+	if err != nil {
+		slog.Error("连接 rabbitmq", "err", err)
+		os.Exit(1)
+	}
+	defer m.Close()
+	st, err := storage.NewMinIO(cfg.MinIO.Endpoint, cfg.MinIO.AccessKey, cfg.MinIO.SecretKey, cfg.MinIO.Bucket, cfg.MinIO.UseSSL)
+	if err != nil {
+		slog.Error("连接 MinIO", "err", err)
+		os.Exit(1)
+	}
+	if err := snowflake.Init(cfg.Snowflake.Node); err != nil {
+		slog.Error("初始化 Snowflake", "err", err)
+		os.Exit(1)
+	}
+	noteSvc := note.NewService(note.NewRepository(gormDB), st, m, rdb)
+	note.RegisterRoutes(r.Group("/api/v1"), note.NewHandler(noteSvc), cfg.JWT.Secret)
 }

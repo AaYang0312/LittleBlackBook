@@ -26,7 +26,7 @@ func Fail(c *gin.Context, err error) {
 		switch e.Code {
 		case errs.ErrParam.Code:
 			status = http.StatusBadRequest
-		case errs.ErrUnauthorized.Code:
+		case errs.ErrUnauthorized.Code, errs.ErrWrongPassword.Code:
 			status = http.StatusUnauthorized
 		case errs.ErrNoteNotFound.Code:
 			status = http.StatusNotFound
