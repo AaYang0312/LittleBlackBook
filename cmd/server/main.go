@@ -3,11 +3,13 @@ package main
 import (
 	"log/slog"
 	"os"
+	"time"
 	"xbs/internal/pkg/config"
 	"xbs/internal/pkg/db"
 	"xbs/internal/pkg/errs"
 	"xbs/internal/pkg/middleware"
 	"xbs/internal/pkg/response"
+	"xbs/internal/user"
 
 	"github.com/gin-gonic/gin"
 )
@@ -40,6 +42,8 @@ func main() {
 		response.OK(c, gin.H{"status": "ok"})
 		//response.OK(c, gin.H{"status": "ok"})
 	})
+	userSvc := user.NewService(user.NewRepository(gormDB), cfg.JWT.Secret, time.Duration(cfg.JWT.ExpireHours)*time.Hour)
+	user.RegisterRoutes(r.Group("/api/v1"), user.NewHandler(userSvc), cfg.JWT.Secret)
 	if err := r.Run(cfg.Server.Addr); err != nil {
 		slog.Error("server exit", "err", err)
 	}
