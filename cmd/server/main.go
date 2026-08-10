@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"os"
 	"time"
+	"xbs/internal/interaction"
 	"xbs/internal/note"
 	"xbs/internal/pkg/cache"
 	"xbs/internal/pkg/config"
@@ -49,9 +50,6 @@ func main() {
 	})
 	userSvc := user.NewService(user.NewRepository(gormDB), cfg.JWT.Secret, time.Duration(cfg.JWT.ExpireHours)*time.Hour)
 	user.RegisterRoutes(r.Group("/api/v1"), user.NewHandler(userSvc), cfg.JWT.Secret)
-	if err := r.Run(cfg.Server.Addr); err != nil {
-		slog.Error("server exit", "err", err)
-	}
 	m, err := mq.New(cfg.RabbitMQ.URL)
 	if err != nil {
 		slog.Error("连接 rabbitmq", "err", err)
@@ -69,4 +67,9 @@ func main() {
 	}
 	noteSvc := note.NewService(note.NewRepository(gormDB), st, m, rdb, cache.New(rdb))
 	note.RegisterRoutes(r.Group("/api/v1"), note.NewHandler(noteSvc), cfg.JWT.Secret)
+	interactionSvc := interaction.NewService(interaction.NewRepository(gormDB), rdb, m, noteSvc)
+	interaction.RegisterRoutes(r.Group("/api/v1"), interaction.NewHandler(interactionSvc), cfg.JWT.Secret)
+	if err := r.Run(cfg.Server.Addr); err != nil {
+		slog.Error("server exit", "err", err)
+	}
 }

@@ -162,6 +162,8 @@ func (s *service) Delete(ctx context.Context, id, userID int64) error {
 		}
 		return err
 	}
+	// 软删除后失效详情缓存，避免删除后仍能查到
+	_ = s.rdb.Del(ctx, fmt.Sprintf("note:cache:%d", id)).Err()
 	return nil
 }
 func (s *service) AddCountDelta(ctx context.Context, id int64, field string, delta int) error {
