@@ -5,6 +5,7 @@ import (
 	"os"
 	"time"
 	"xbs/internal/note"
+	"xbs/internal/pkg/cache"
 	"xbs/internal/pkg/config"
 	"xbs/internal/pkg/db"
 	"xbs/internal/pkg/errs"
@@ -66,6 +67,6 @@ func main() {
 		slog.Error("初始化 Snowflake", "err", err)
 		os.Exit(1)
 	}
-	noteSvc := note.NewService(note.NewRepository(gormDB), st, m, rdb)
+	noteSvc := note.NewService(note.NewRepository(gormDB), st, m, rdb, cache.New(rdb))
 	note.RegisterRoutes(r.Group("/api/v1"), note.NewHandler(noteSvc), cfg.JWT.Secret)
 }

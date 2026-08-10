@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"path"
 	"time"
+	"xbs/internal/pkg/cache"
 	"xbs/internal/pkg/counter"
 	"xbs/internal/pkg/errs"
 	"xbs/internal/pkg/mq"
@@ -35,10 +36,11 @@ type service struct {
 	st   storage.Storage
 	m    *mq.MQ
 	rdb  *redis.Client
+	c    *cache.Cache
 }
 
-func NewService(repo Repository, st storage.Storage, m *mq.MQ, rdb *redis.Client) Service {
-	return &service{repo: repo, st: st, m: m, rdb: rdb}
+func NewService(repo Repository, st storage.Storage, m *mq.MQ, rdb *redis.Client, c *cache.Cache) Service {
+	return &service{repo: repo, st: st, m: m, rdb: rdb, c: c}
 }
 func (s *service) Publish(ctx context.Context, userID int64, title, content string, images []string) (*Note, error) {
 	if title == "" || len(images) == 0 {
@@ -86,16 +88,29 @@ func (s *service) overlayCounts(ctx context.Context, dto *NoteDTO) {
 	}
 }
 func (s *service) Detail(ctx context.Context, id int64) (*NoteDTO, error) {
-	n, err := s.repo.FindByID(ctx, id)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, errs.ErrNoteNotFound
-	}
+	key := fmt.Sprintf("note:cache:%d", id)
+	raw, err := s.c.GetOrLoad(ctx, key, time.Hour, func(ctx context.Context) (string, error) {
+		n, err := s.repo.FindByID(ctx, id)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", errs.ErrNoteNotFound
+		}
+		if err != nil {
+			return "", err
+		}
+		// 缓存 DTO 而非 Note：Note.Images 等字段带 json:"-"（供 Publish 直接返回），
+		// 直接序列化 Note 会在缓存往返中丢失这些字段。
+		b, _ := json.Marshal(toDTO(n))
+		return string(b), nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	dto := toDTO(n)
-	s.overlayCounts(ctx, dto)
-	return dto, nil
+	var dto NoteDTO
+	if err := json.Unmarshal([]byte(raw), &dto); err != nil {
+		return nil, err
+	}
+	s.overlayCounts(ctx, &dto)
+	return &dto, nil
 }
 func (s *service) BatchByIDs(ctx context.Context, ids []int64) ([]*NoteDTO, error) {
 	ns, err := s.repo.BatchFindByIDs(ctx, ids)

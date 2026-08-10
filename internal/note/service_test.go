@@ -6,7 +6,10 @@ import (
 	"io"
 	"sort"
 	"testing"
+	"xbs/internal/pkg/cache"
+	"xbs/internal/pkg/db"
 
+	"github.com/alicebob/miniredis/v2"
 	"gorm.io/gorm"
 
 	"xbs/internal/note"
@@ -69,11 +72,15 @@ type fakeStorage struct{}
 func (fakeStorage) Upload(_ context.Context, _ io.Reader, _ int64, name, _ string) (string, error) {
 	return "http://minio/xhs-images/" + name, nil
 }
+func NewTestCache(t *testing.T) *cache.Cache {
+	mr := miniredis.RunT(t)
+	return cache.New(db.NewRedis(mr.Addr(), "", 0))
+}
 
 func TestPublishAndDetail(t *testing.T) {
 	_ = snowflake.Init(1)
 	repo := newFakeRepo()
-	svc := note.NewService(repo, fakeStorage{}, nil, nil) // mq=nil 时跳过 fanout 发布；rdb=nil 时跳过实时计数覆盖
+	svc := note.NewService(repo, fakeStorage{}, nil, nil, NewTestCache(t)) // mq=nil 时跳过 fanout 发布；rdb=nil 时跳过实时计数覆盖
 	n, err := svc.Publish(context.Background(), 7, "标题", "正文", []string{"http://minio/xhs-images/a.jpg"})
 	if err != nil {
 		t.Fatal(err)
@@ -92,7 +99,7 @@ func TestPublishAndDetail(t *testing.T) {
 
 func TestDetailNotFound(t *testing.T) {
 	_ = snowflake.Init(1)
-	svc := note.NewService(newFakeRepo(), fakeStorage{}, nil, nil)
+	svc := note.NewService(newFakeRepo(), fakeStorage{}, nil, nil, NewTestCache(t))
 	_, err := svc.Detail(context.Background(), 999)
 	if !errors.Is(err, errs.ErrNoteNotFound) {
 		t.Fatalf("want ErrNoteNotFound, got %v", err)
@@ -101,7 +108,7 @@ func TestDetailNotFound(t *testing.T) {
 
 func TestPublishRequiresImage(t *testing.T) {
 	_ = snowflake.Init(1)
-	svc := note.NewService(newFakeRepo(), fakeStorage{}, nil, nil)
+	svc := note.NewService(newFakeRepo(), fakeStorage{}, nil, nil, NewTestCache(t))
 	if _, err := svc.Publish(context.Background(), 7, "t", "c", nil); !errors.Is(err, errs.ErrParam) {
 		t.Fatalf("want ErrParam, got %v", err)
 	}
@@ -110,7 +117,7 @@ func TestPublishRequiresImage(t *testing.T) {
 func TestLatestPagination(t *testing.T) {
 	_ = snowflake.Init(1)
 	repo := newFakeRepo()
-	svc := note.NewService(repo, fakeStorage{}, nil, nil)
+	svc := note.NewService(repo, fakeStorage{}, nil, nil, NewTestCache(t))
 	for i := 0; i < 25; i++ {
 		if _, err := svc.Publish(context.Background(), 1, "title", "content", []string{"u"}); err != nil {
 			t.Fatal(err)
