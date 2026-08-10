@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sort"
 	"testing"
 
 	"gorm.io/gorm"
@@ -36,7 +37,21 @@ func (f *fakeRepo) BatchFindByIDs(_ context.Context, ids []int64) ([]*note.Note,
 	}
 	return out, nil
 }
-func (f *fakeRepo) ListLatest(context.Context, int64, int) ([]*note.Note, error) { return nil, nil }
+func (f *fakeRepo) ListLatest(_ context.Context, cursor int64, size int) ([]*note.Note, error) {
+	var all []*note.Note
+	for _, n := range f.byID {
+		if n.Status == 0 && (cursor == 0 || n.ID < cursor) {
+			all = append(all, n)
+		}
+	}
+	sort.Slice(all, func(i, j int) bool {
+		return all[i].ID > all[j].ID
+	})
+	if len(all) > size+1 {
+		all = all[:size+1]
+	}
+	return all, nil
+}
 func (f *fakeRepo) SoftDelete(_ context.Context, id, userID int64) error {
 	n, ok := f.byID[id]
 	if !ok || n.UserID != userID {
@@ -89,5 +104,37 @@ func TestPublishRequiresImage(t *testing.T) {
 	svc := note.NewService(newFakeRepo(), fakeStorage{}, nil, nil)
 	if _, err := svc.Publish(context.Background(), 7, "t", "c", nil); !errors.Is(err, errs.ErrParam) {
 		t.Fatalf("want ErrParam, got %v", err)
+	}
+}
+
+func TestLatestPagination(t *testing.T) {
+	_ = snowflake.Init(1)
+	repo := newFakeRepo()
+	svc := note.NewService(repo, fakeStorage{}, nil, nil)
+	for i := 0; i < 25; i++ {
+		if _, err := svc.Publish(context.Background(), 1, "title", "content", []string{"u"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p1, err := svc.Latest(context.Background(), 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p1.List) != 10 || !p1.HasMore {
+		t.Fatalf("page1: len=%d, HasMore=%v", len(p1.List), p1.HasMore)
+	}
+	p2, err := svc.Latest(context.Background(), p1.NextCursor, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p2.List) != 10 || p2.List[0].ID >= p1.NextCursor {
+		t.Fatalf("page2 not descending from cursor: %+v", p2.List[0])
+	}
+	seen := map[int64]bool{}
+	for _, d := range append(p1.List, p2.List...) {
+		if seen[d.ID] {
+			t.Fatalf("duplicate across pages: %d", d.ID)
+		}
+		seen[d.ID] = true
 	}
 }
