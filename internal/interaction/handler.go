@@ -30,3 +30,36 @@ func (h *Handler) Unfollow(c *gin.Context) {
 	}
 	response.OK(c, nil)
 }
+
+func (h *Handler) Like(c *gin.Context) {
+	noteID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err := h.svc.Like(c.Request.Context(), middleware.CurrentUserID(c), noteID); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, nil)
+}
+func (h *Handler) Unlike(c *gin.Context) {
+	noteID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err := h.svc.Unlike(c.Request.Context(), middleware.CurrentUserID(c), noteID); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, nil)
+}
+func (h *Handler) Collect(c *gin.Context) {
+	noteID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err := h.svc.Collect(c.Request.Context(), middleware.CurrentUserID(c), noteID); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, nil)
+}
+func (h *Handler) Uncollect(c *gin.Context) {
+	noteID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err := h.svc.Uncollect(c.Request.Context(), middleware.CurrentUserID(c), noteID); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, nil)
+}

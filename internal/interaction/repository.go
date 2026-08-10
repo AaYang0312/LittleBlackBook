@@ -75,7 +75,7 @@ type gormLikeRepo struct {
 func NewLikeRepository(db *gorm.DB) LikeRepository { return &gormLikeRepo{db: db} }
 
 func (r *gormLikeRepo) InsertIgnore(ctx context.Context, userID, noteID int64) (bool, error) {
-	res := r.db.WithContext(ctx).Clauses(clause.Insert{Modifier: "IGNORE"}).
+	res := r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).
 		Create(&Like{UserID: userID, NoteID: noteID})
 	return res.RowsAffected > 0, res.Error
 }
@@ -95,7 +95,7 @@ type gormCollectRepo struct{ db *gorm.DB }
 func NewCollectRepository(db *gorm.DB) CollectRepository { return &gormCollectRepo{db: db} }
 
 func (r *gormCollectRepo) InsertIgnore(ctx context.Context, userID, noteID int64) (bool, error) {
-	res := r.db.WithContext(ctx).Clauses(clause.Insert{Modifier: "IGNORE"}).
+	res := r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).
 		Create(&Collect{UserID: userID, NoteID: noteID})
 	return res.RowsAffected > 0, res.Error
 }

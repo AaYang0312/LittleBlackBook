@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"xbs/internal/pkg/db"
 	"xbs/internal/pkg/errs"
+	"xbs/internal/pkg/mq"
 
+	"github.com/alicebob/miniredis/v2"
 	mysqlDriver "github.com/go-sql-driver/mysql"
 )
 
@@ -38,6 +41,44 @@ func (f *fakeFollowRepo) FollowerIDs(_ context.Context, b int64) ([]int64, error
 	}
 	return out, nil
 }
+func TestLikeIdempotent(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := db.NewRedis(mr.Addr(), "", 0)
+	var published []mq.LikeEvent
+	svc := NewServiceForTest(&Repos{}, rdb,
+		func(_ context.Context, ev mq.LikeEvent) error {
+			published = append(published, ev)
+			return nil
+		}, nil)
+	ctx := context.Background()
+	if err := svc.Like(ctx, 1, 100); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Like(ctx, 1, 100); err != nil { // 双击 → 幂等
+		t.Fatal(err)
+	}
+	if len(published) != 1 || published[0].Delta != 1 || published[0].Kind != "like" {
+		t.Fatalf("published=%v", published)
+	}
+	cnt, _ := rdb.Get(ctx, "note:like:count:100").Int64()
+	if cnt != 1 {
+		t.Fatalf("count=%d", cnt)
+	}
+	if err := svc.Unlike(ctx, 1, 100); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Unlike(ctx, 1, 100); err != nil { // 重复取消 → 幂等
+		t.Fatal(err)
+	}
+	if len(published) != 2 || published[1].Delta != -1 {
+		t.Fatalf("published=%v", published)
+	}
+	cnt, _ = rdb.Get(ctx, "note:like:count:100").Int64()
+	if cnt != 0 {
+		t.Fatalf("count=%d", cnt)
+	}
+}
+
 func TestFollowTargetNotExists(t *testing.T) {
 	repo := newFakeFollowRepo()
 	repo.insertErr = &mysqlDriver.MySQLError{Number: 1452} // 外键 violation

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"xbs/internal/note"
+	"xbs/internal/pkg/counter"
 	"xbs/internal/pkg/errs"
 	"xbs/internal/pkg/mq"
 
@@ -16,10 +17,11 @@ type Service interface {
 	Unfollow(ctx context.Context, me, target int64) error
 	FollowerIDs(ctx context.Context, authorID int64) ([]int64, error)
 
-	//Like(ctx context.Context, userID, noteID int64) error
-	//Unlike(ctx context.Context, userID, noteID int64) error
-	//Collect(ctx context.Context, userID, noteID int64) error
-	//Uncollect(ctx context.Context, userID, noteID int64) error
+	Like(ctx context.Context, userID, noteID int64) error
+	Unlike(ctx context.Context, userID, noteID int64) error
+	Collect(ctx context.Context, userID, noteID int64) error
+	Uncollect(ctx context.Context, userID, noteID int64) error
+
 	//ApplyLikeEvent(ctx context.Context, ev mq.LikeEvent) error
 	//
 	//CreateComment(ctx context.Context, userID, noteID int64, content string) (*Comment, error)
@@ -32,10 +34,23 @@ type service struct {
 	rdb     *redis.Client
 	m       *mq.MQ
 	noteSvc note.Service
+	publish func(ctx context.Context, ev mq.LikeEvent) error
 }
 
 func NewService(repos *Repos, rdb *redis.Client, m *mq.MQ, noteSvc note.Service) Service {
-	return &service{repos: repos, rdb: rdb, m: m, noteSvc: noteSvc}
+	svc := &service{repos: repos, rdb: rdb, m: m, noteSvc: noteSvc}
+	svc.publish = func(ctx context.Context, ev mq.LikeEvent) error {
+		if m == nil {
+			return nil
+		}
+		return m.Publish(ctx, mq.QueueLikeEvent, ev)
+	}
+	return svc
+}
+
+// NewServiceForTest 注入 publish 便于单测
+func NewServiceForTest(repos *Repos, rdb *redis.Client, publish func(ctx context.Context, ev mq.LikeEvent) error, noteSvc note.Service) Service {
+	return &service{repos: repos, rdb: rdb, publish: publish, noteSvc: noteSvc}
 }
 func (s *service) Follow(ctx context.Context, me, target int64) error {
 	if me == target || me == 0 || target == 0 {
@@ -57,4 +72,38 @@ func (s *service) Unfollow(ctx context.Context, me, target int64) error {
 
 func (s *service) FollowerIDs(ctx context.Context, authorID int64) ([]int64, error) {
 	return s.repos.Follow.FollowerIDs(ctx, authorID)
+}
+
+func (s *service) Like(ctx context.Context, userID, noteID int64) error {
+	return s.react(ctx, counter.KindLike, userID, noteID, 1)
+}
+func (s *service) Unlike(ctx context.Context, userID, noteID int64) error {
+	return s.react(ctx, counter.KindLike, userID, noteID, -1)
+}
+func (s *service) Collect(ctx context.Context, userID, noteID int64) error {
+	return s.react(ctx, counter.KindCollect, userID, noteID, 1)
+}
+func (s *service) Uncollect(ctx context.Context, userID, noteID int64) error {
+	return s.react(ctx, counter.KindCollect, userID, noteID, -1)
+}
+
+// react：SADD/SREM 判重（第一层幂等）→ INCR/DECR 实时计数 → 发 MQ 异步落库。
+func (s *service) react(ctx context.Context, kind string, userID, noteID int64, delta int) error {
+	var changed int64
+	var err error
+	if delta > 0 {
+		changed, err = s.rdb.SAdd(ctx, counter.UsersKey(kind, noteID), userID).Result()
+	} else {
+		changed, err = s.rdb.SRem(ctx, counter.UsersKey(kind, noteID), userID).Result()
+	}
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		return nil // 幂等：重复操作直接成功
+	}
+	if err := s.rdb.IncrBy(ctx, counter.CountKey(kind, noteID), int64(delta)).Err(); err != nil {
+		return err
+	}
+	return s.publish(ctx, mq.LikeEvent{Kind: kind, NoteID: noteID, UserID: userID, Delta: delta})
 }
