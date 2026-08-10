@@ -2,15 +2,23 @@ package interaction
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"xbs/internal/pkg/errs"
+
+	mysqlDriver "github.com/go-sql-driver/mysql"
 )
 
 type fakeFollowRepo struct {
-	pairs map[[2]int64]bool
+	pairs     map[[2]int64]bool
+	insertErr error
 }
 
 func newFakeFollowRepo() *fakeFollowRepo { return &fakeFollowRepo{pairs: make(map[[2]int64]bool)} }
 func (f *fakeFollowRepo) InsertIgnore(_ context.Context, a, b int64) error {
+	if f.insertErr != nil {
+		return f.insertErr
+	}
 	f.pairs[[2]int64{a, b}] = true
 	return nil
 }
@@ -30,6 +38,16 @@ func (f *fakeFollowRepo) FollowerIDs(_ context.Context, b int64) ([]int64, error
 	}
 	return out, nil
 }
+func TestFollowTargetNotExists(t *testing.T) {
+	repo := newFakeFollowRepo()
+	repo.insertErr = &mysqlDriver.MySQLError{Number: 1452} // 外键 violation
+	svc := NewService(&Repos{Follow: repo}, nil, nil, nil)
+	err := svc.Follow(context.Background(), 1, 999)
+	if !errors.Is(err, errs.ErrUserNotFound) {
+		t.Fatalf("err=%v, want ErrUserNotFound", err)
+	}
+}
+
 func TestFollowIdempotent(t *testing.T) {
 	repo := newFakeFollowRepo()
 	svc := NewService(&Repos{Follow: repo}, nil, nil, nil)
