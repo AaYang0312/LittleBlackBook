@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"os"
+	"xbs/internal/feed"
 	"xbs/internal/interaction"
 	"xbs/internal/note"
 	"xbs/internal/pkg/cache"
@@ -52,5 +53,16 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("worker started")
+	feedSvc := feed.NewService(rdb, noteSvc, interactionSvc, 500)
+	if err := m.Consume(mq.QueueFeedFanout, func(body []byte) error {
+		var ev mq.FanoutEvent
+		if err := json.Unmarshal(body, &ev); err != nil {
+			return err
+		}
+		return feedSvc.HandleFanout(context.Background(), ev)
+	}); err != nil {
+		slog.Error("consume feed_fanout", "err", err)
+		os.Exit(1)
+	}
 	select {}
 }
