@@ -7,6 +7,7 @@ import (
 	"xbs/internal/pkg/db"
 	"xbs/internal/pkg/errs"
 	"xbs/internal/pkg/mq"
+	"xbs/internal/pkg/snowflake"
 
 	"github.com/alicebob/miniredis/v2"
 	mysqlDriver "github.com/go-sql-driver/mysql"
@@ -184,5 +185,57 @@ func TestApplyLikeEventExactlyOnce(t *testing.T) {
 	}
 	if len(nc.deltas) != 2 || nc.deltas[1] != -1 {
 		t.Fatalf("deltas=%v", nc.deltas)
+	}
+}
+
+type fakeCommentRepo struct {
+	list []*Comment
+}
+
+func (f *fakeCommentRepo) Create(_ context.Context, c *Comment) error {
+	f.list = append(f.list, c)
+	return nil
+}
+func (f *fakeCommentRepo) ListByNote(_ context.Context, noteID, _ int64, _ int) ([]*Comment, error) {
+	var out []*Comment
+	for _, c := range f.list {
+		if c.NoteID == noteID {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+func (f *fakeCommentRepo) CountByNote(_ context.Context, noteID int64) (int64, error) {
+	var n int64
+	for _, c := range f.list {
+		if c.NoteID == noteID {
+			n++
+		}
+	}
+	return n, nil
+}
+func TestCreateCommentIncrementsCount(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := db.NewRedis(mr.Addr(), "", 0)
+	_ = snowflake.Init(1)
+	nc := &fakeNoteCounter{}
+	comments := &fakeCommentRepo{}
+	svc := NewServiceForTest(&Repos{Comment: comments}, rdb, nil, nc)
+	c, err := svc.CreateComment(context.Background(), 1, 100, "good")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.ID <= 0 {
+		t.Fatalf("bad comment id: %d", c.ID)
+	}
+	if len(nc.deltas) != 1 || nc.deltas[0] != 1 {
+		t.Fatalf("note delta=%v", nc.deltas)
+	}
+	cnt, _ := rdb.Get(context.Background(), "note:comment:count:100").Int64()
+	if cnt != 1 {
+		t.Fatalf("redis comment count=%d", cnt)
+	}
+	if _, err := svc.CreateComment(context.Background(), 1, 100, ""); !errors.Is(err, errs.ErrParam) {
+		t.Fatalf("empty content should fail")
 	}
 }

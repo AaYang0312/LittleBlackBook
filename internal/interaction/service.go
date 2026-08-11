@@ -6,6 +6,7 @@ import (
 	"xbs/internal/pkg/counter"
 	"xbs/internal/pkg/errs"
 	"xbs/internal/pkg/mq"
+	"xbs/internal/pkg/snowflake"
 
 	mysqlDriver "github.com/go-sql-driver/mysql"
 	"github.com/redis/go-redis/v9"
@@ -23,8 +24,8 @@ type Service interface {
 
 	ApplyLikeEvent(ctx context.Context, ev mq.LikeEvent) error
 	//
-	//CreateComment(ctx context.Context, userID, noteID int64, content string) (*Comment, error)
-	//ListComments(ctx context.Context, noteID, cursor int64, size int) ([]*Comment, error)
+	CreateComment(ctx context.Context, userID, noteID int64, content string) (*Comment, error)
+	ListComments(ctx context.Context, noteID, cursor int64, size int) ([]*Comment, error)
 	//
 	//RebuildCounts(ctx context.Context) error
 }
@@ -143,4 +144,35 @@ func (s *service) ApplyLikeEvent(c context.Context, ev mq.LikeEvent) error {
 		return nil
 	}
 	return s.noteSvc.AddCountDelta(c, ev.NoteID, field, -1)
+}
+func (s *service) CreateComment(ctx context.Context, userID, noteID int64, content string) (*Comment, error) {
+	if content == "" {
+		return nil, errs.ErrParam
+	}
+	c := &Comment{
+		ID:      snowflake.NextID(),
+		NoteID:  noteID,
+		UserID:  userID,
+		Content: content,
+	}
+	// 写为低频操作直接入库
+	if err := s.repos.Comment.Create(ctx, c); err != nil {
+		return nil, err
+	}
+	// 原子更新 db 计数
+	if err := s.noteSvc.AddCountDelta(ctx, noteID, "comment_count", 1); err != nil {
+		return nil, err
+	}
+	// 更新 redis
+	if s.rdb != nil {
+		_ = s.rdb.Incr(ctx, counter.CountKey(counter.KindComment, noteID)).Err()
+	}
+	return c, nil
+}
+
+func (s *service) ListComments(ctx context.Context, noteID, cursor int64, size int) ([]*Comment, error) {
+	if size <= 0 || size > 50 {
+		size = 20
+	}
+	return s.repos.Comment.ListByNote(ctx, noteID, cursor, size)
 }
