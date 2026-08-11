@@ -3,7 +3,6 @@ package interaction
 import (
 	"context"
 	"errors"
-	"xbs/internal/note"
 	"xbs/internal/pkg/counter"
 	"xbs/internal/pkg/errs"
 	"xbs/internal/pkg/mq"
@@ -22,7 +21,7 @@ type Service interface {
 	Collect(ctx context.Context, userID, noteID int64) error
 	Uncollect(ctx context.Context, userID, noteID int64) error
 
-	//ApplyLikeEvent(ctx context.Context, ev mq.LikeEvent) error
+	ApplyLikeEvent(ctx context.Context, ev mq.LikeEvent) error
 	//
 	//CreateComment(ctx context.Context, userID, noteID int64, content string) (*Comment, error)
 	//ListComments(ctx context.Context, noteID, cursor int64, size int) ([]*Comment, error)
@@ -33,11 +32,16 @@ type service struct {
 	repos   *Repos
 	rdb     *redis.Client
 	m       *mq.MQ
-	noteSvc note.Service
+	noteSvc noteCounter
 	publish func(ctx context.Context, ev mq.LikeEvent) error
 }
+type noteCounter interface {
+	AddCountDelta(ctx context.Context, id int64, field string, delta int) error
+	ListAllIDs(ctx context.Context) ([]int64, error)
+	SetCounts(ctx context.Context, id int64, like, collect, comment int64) error
+}
 
-func NewService(repos *Repos, rdb *redis.Client, m *mq.MQ, noteSvc note.Service) Service {
+func NewService(repos *Repos, rdb *redis.Client, m *mq.MQ, noteSvc noteCounter) Service {
 	svc := &service{repos: repos, rdb: rdb, m: m, noteSvc: noteSvc}
 	svc.publish = func(ctx context.Context, ev mq.LikeEvent) error {
 		if m == nil {
@@ -49,7 +53,7 @@ func NewService(repos *Repos, rdb *redis.Client, m *mq.MQ, noteSvc note.Service)
 }
 
 // NewServiceForTest 注入 publish 便于单测
-func NewServiceForTest(repos *Repos, rdb *redis.Client, publish func(ctx context.Context, ev mq.LikeEvent) error, noteSvc note.Service) Service {
+func NewServiceForTest(repos *Repos, rdb *redis.Client, publish func(ctx context.Context, ev mq.LikeEvent) error, noteSvc noteCounter) Service {
 	return &service{repos: repos, rdb: rdb, publish: publish, noteSvc: noteSvc}
 }
 func (s *service) Follow(ctx context.Context, me, target int64) error {
@@ -106,4 +110,37 @@ func (s *service) react(ctx context.Context, kind string, userID, noteID int64, 
 		return err
 	}
 	return s.publish(ctx, mq.LikeEvent{Kind: kind, NoteID: noteID, UserID: userID, Delta: delta})
+}
+func (s *service) ApplyLikeEvent(c context.Context, ev mq.LikeEvent) error {
+	var repo interface {
+		InsertIgnore(ctx context.Context, userID, noteID int64) (bool, error)
+		Delete(ctx context.Context, userID, noteID int64) (bool, error)
+	}
+	var field string
+	switch ev.Kind {
+	case counter.KindLike:
+		repo, field = s.repos.Like, "like_count"
+	case counter.KindCollect:
+		repo, field = s.repos.Collect, "collect_count"
+	default:
+		return errs.ErrParam
+	}
+	if ev.Delta > 0 {
+		created, err := repo.InsertIgnore(c, ev.UserID, ev.NoteID)
+		if err != nil {
+			return err
+		}
+		if !created {
+			return nil //重复事件，跳过
+		}
+		return s.noteSvc.AddCountDelta(c, ev.NoteID, field, 1)
+	}
+	deleted, err := repo.Delete(c, ev.UserID, ev.NoteID)
+	if err != nil {
+		return err
+	}
+	if !deleted {
+		return nil
+	}
+	return s.noteSvc.AddCountDelta(c, ev.NoteID, field, -1)
 }

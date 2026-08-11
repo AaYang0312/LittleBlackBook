@@ -111,3 +111,78 @@ func TestFollowIdempotent(t *testing.T) {
 		t.Fatalf("after unfollow fans=%v", fans)
 	}
 }
+
+type fakeLikeRepo struct {
+	pairs map[[2]int64]bool
+}
+
+func newFakeLikeRepo() *fakeLikeRepo { return &fakeLikeRepo{pairs: make(map[[2]int64]bool)} }
+
+func (f *fakeLikeRepo) InsertIgnore(_ context.Context, a, b int64) (bool, error) {
+	k := [2]int64{a, b}
+	if f.pairs[k] {
+		return false, nil
+	}
+	f.pairs[k] = true
+	return true, nil
+}
+func (f *fakeLikeRepo) Delete(_ context.Context, a, b int64) (bool, error) {
+	k := [2]int64{a, b}
+	if !f.pairs[k] {
+		return false, nil
+	}
+	delete(f.pairs, k)
+	return true, nil
+}
+func (f *fakeLikeRepo) CountByNote(_ context.Context, b int64) (int64, error) {
+	var a int64
+	for k := range f.pairs {
+		if k[1] == b {
+			a++
+		}
+	}
+	return a, nil
+}
+
+type fakeNoteCounter struct {
+	deltas []int
+}
+
+func (f *fakeNoteCounter) AddCountDelta(_ context.Context, _ int64, _ string, delta int) error {
+	f.deltas = append(f.deltas, delta)
+	return nil
+}
+func (f *fakeNoteCounter) ListAllIDs(context.Context) ([]int64, error)                 { return nil, nil }
+func (f *fakeNoteCounter) SetCounts(context.Context, int64, int64, int64, int64) error { return nil }
+
+func TestApplyLikeEventExactlyOnce(t *testing.T) {
+	likes := newFakeLikeRepo()
+	nc := &fakeNoteCounter{}
+	svc := NewServiceForTest(&Repos{Like: likes}, nil, nil, nc)
+	ctx := context.Background()
+	ev := mq.LikeEvent{
+		Kind:   "like",
+		NoteID: 100,
+		UserID: 1,
+		Delta:  1,
+	}
+	if err := svc.ApplyLikeEvent(ctx, ev); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.ApplyLikeEvent(ctx, ev); err != nil {
+		t.Fatal(err) // mq 重复投递
+	}
+	if len(nc.deltas) != 1 || nc.deltas[0] != 1 {
+		t.Fatalf("delta=%v", nc.deltas)
+	}
+	ev.Delta = -1
+	if err := svc.ApplyLikeEvent(ctx, ev); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.ApplyLikeEvent(ctx, ev); err != nil { // 重复的取消事件
+		t.Fatal(err)
+	}
+	if len(nc.deltas) != 2 || nc.deltas[1] != -1 {
+		t.Fatalf("deltas=%v", nc.deltas)
+	}
+}
