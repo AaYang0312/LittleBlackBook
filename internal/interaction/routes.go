@@ -6,8 +6,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func RegisterRoutes(rg *gin.RouterGroup, h *Handler, jwtSecert string) {
-	auth := rg.Group("", middleware.JWTAuth(jwtSecert))
+func RegisterRoutes(rg *gin.RouterGroup, h *Handler, jwtSecret string) {
+	auth := rg.Group("", middleware.JWTAuth(jwtSecret))
 	auth.POST("/users/:id/follow", h.Follow)
 	auth.DELETE("/users/:id/follow", h.Unfollow)
 	auth.POST("/notes/:id/like", h.Like)
