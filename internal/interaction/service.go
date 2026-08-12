@@ -27,7 +27,7 @@ type Service interface {
 	CreateComment(ctx context.Context, userID, noteID int64, content string) (*Comment, error)
 	ListComments(ctx context.Context, noteID, cursor int64, size int) ([]*Comment, error)
 	//
-	//RebuildCounts(ctx context.Context) error
+	RebuildCounts(ctx context.Context) error
 }
 type service struct {
 	repos   *Repos
@@ -175,4 +175,42 @@ func (s *service) ListComments(ctx context.Context, noteID, cursor int64, size i
 		size = 20
 	}
 	return s.repos.Comment.ListByNote(ctx, noteID, cursor, size)
+}
+
+// RebuildCounts: 关系表是唯一事实来源-Redis 丢失后从表中重建
+func (s *service) RebuildCounts(ctx context.Context) error {
+	noteids, err := s.noteSvc.ListAllIDs(ctx)
+	if err != nil {
+		return err
+	}
+	for _, noteid := range noteids {
+		// 从关系库中拿真实数据
+		like, err := s.repos.Like.CountByNote(ctx, noteid)
+		if err != nil {
+			return err
+		}
+		comment, err := s.repos.Comment.CountByNote(ctx, noteid)
+		if err != nil {
+			return err
+		}
+		collect, err := s.repos.Collect.CountByNote(ctx, noteid)
+		if err != nil {
+			return err
+		}
+		// 写 Redis
+		if err := s.rdb.Set(ctx, counter.CountKey(counter.KindLike, noteid), like, 0).Err(); err != nil {
+			return err
+		}
+		if err := s.rdb.Set(ctx, counter.CountKey(counter.KindCollect, noteid), collect, 0).Err(); err != nil {
+			return err
+		}
+		if err := s.rdb.Set(ctx, counter.CountKey(counter.KindComment, noteid), comment, 0).Err(); err != nil {
+			return err
+		}
+		//
+		if err := s.noteSvc.SetCounts(ctx, noteid, like, collect, comment); err != nil {
+			return err
+		}
+	}
+	return nil
 }

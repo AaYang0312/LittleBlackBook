@@ -95,3 +95,10 @@ func (h *Handler) ListComments(c *gin.Context) {
 	}
 	response.OK(c, cs)
 }
+func (h *Handler) RebuildCounts(c *gin.Context) {
+	if err := h.svc.RebuildCounts(c.Request.Context()); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, nil)
+}

@@ -239,3 +239,56 @@ func TestCreateCommentIncrementsCount(t *testing.T) {
 		t.Fatalf("empty content should fail")
 	}
 }
+
+type fakeNoteCounterWithIDs struct {
+	ids         []int64
+	setCalls    int
+	lastLike    int64
+	lastComment int64
+}
+
+func (f *fakeNoteCounterWithIDs) AddCountDelta(context.Context, int64, string, int) error { return nil }
+func (f *fakeNoteCounterWithIDs) ListAllIDs(context.Context) ([]int64, error)             { return f.ids, nil }
+func (f *fakeNoteCounterWithIDs) SetCounts(_ context.Context, _ int64, like, _, comment int64) error {
+	f.setCalls++
+	f.lastLike = like
+	f.lastComment = comment
+	return nil
+}
+
+// CollectRepository 与 LikeRepository 形状相同，直接复用 fakeLikeRepo 不满足类型时包一层：
+type fakeCollectRepo struct{ inner *fakeLikeRepo }
+
+func newFakeLikeRepoAdapter() *fakeCollectRepo { return &fakeCollectRepo{inner: newFakeLikeRepo()} }
+func (f *fakeCollectRepo) InsertIgnore(ctx context.Context, a, b int64) (bool, error) {
+	return f.inner.InsertIgnore(ctx, a, b)
+}
+func (f *fakeCollectRepo) Delete(ctx context.Context, a, b int64) (bool, error) {
+	return f.inner.Delete(ctx, a, b)
+}
+func (f *fakeCollectRepo) CountByNote(ctx context.Context, b int64) (int64, error) {
+	return f.inner.CountByNote(ctx, b)
+}
+func TestRebuildCounts(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := db.NewRedis(mr.Addr(), "", 0)
+	likes := newFakeLikeRepo()
+	likes.pairs[[2]int64{1, 100}] = true
+	likes.pairs[[2]int64{2, 100}] = true
+	comments := &fakeCommentRepo{list: []*Comment{{NoteID: 100, Content: "x"}}}
+	nc := &fakeNoteCounterWithIDs{ids: []int64{100}}
+	svc := NewServiceForTest(&Repos{Like: likes, Comment: comments, Collect: newFakeLikeRepoAdapter()}, rdb, nil, nc)
+	if err := svc.RebuildCounts(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if v, _ := rdb.Get(ctx, "note:like:count:100").Int64(); v != 2 {
+		t.Fatalf("like count=%d", v)
+	}
+	if v, _ := rdb.Get(ctx, "note:comment:count:100").Int64(); v != 1 {
+		t.Fatalf("comment count=%d", v)
+	}
+	if nc.setCalls != 1 || nc.lastLike != 2 || nc.lastComment != 1 {
+		t.Fatalf("SetCalls=%d like=%d comment=%d", nc.setCalls, nc.lastLike, nc.lastComment)
+	}
+}
