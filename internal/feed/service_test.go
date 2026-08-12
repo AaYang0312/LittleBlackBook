@@ -72,3 +72,31 @@ func TestHandleFanoutTrimsInbox(t *testing.T) {
 		t.Fatalf("trimmed inbox=%v", ids)
 	}
 }
+func TestInboxOrderAndSkipDeleted(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := db.NewRedis(mr.Addr(), "", 0)
+	ctx := context.Background()
+	// 模拟三条：101，102，103，其中 102 被删除，BatchByIDs 查不到
+	rdb.ZAdd(ctx, feed.InboxKey(7), redis.Z{
+		Score:  3,
+		Member: 103,
+	}, redis.Z{
+		Score:  2,
+		Member: 102,
+	}, redis.Z{
+		Score:  1,
+		Member: 101,
+	})
+	notes := fakeNotes{m: map[int64]*note.NoteDTO{
+		101: {ID: 101, Title: "a"},
+		103: {ID: 103, Title: "c"},
+	}}
+	svc := feed.NewService(rdb, notes, fakeFollows{}, 500)
+	out, err := svc.Inbox(ctx, 7, 0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 2 || out[0].ID != 103 || out[1].ID != 101 {
+		t.Fatalf("inbox order wrong: %+v", out)
+	}
+}

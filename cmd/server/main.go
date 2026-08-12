@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"os"
 	"time"
+	"xbs/internal/feed"
 	"xbs/internal/interaction"
 	"xbs/internal/note"
 	"xbs/internal/pkg/cache"
@@ -69,6 +70,8 @@ func main() {
 	note.RegisterRoutes(r.Group("/api/v1"), note.NewHandler(noteSvc), cfg.JWT.Secret)
 	interactionSvc := interaction.NewService(interaction.NewRepository(gormDB), rdb, m, noteSvc)
 	interaction.RegisterRoutes(r.Group("/api/v1"), interaction.NewHandler(interactionSvc), cfg.JWT.Secret)
+	feedSvc := feed.NewService(rdb, noteSvc, interactionSvc, 500)
+	feed.RegisterRoutes(r.Group("/api/v1"), feed.NewHandler(feedSvc), cfg.JWT.Secret)
 	if err := r.Run(cfg.Server.Addr); err != nil {
 		slog.Error("server exit", "err", err)
 	}

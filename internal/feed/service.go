@@ -3,6 +3,7 @@ package feed
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"xbs/internal/note"
 	"xbs/internal/pkg/mq"
 
@@ -19,7 +20,7 @@ type NoteLister interface {
 }
 type Service interface {
 	HandleFanout(ctx context.Context, ev mq.FanoutEvent) error
-	//Inbox(ctx context.Context, userID int64, offset, size int) ([]*note.NoteDTO, error)
+	Inbox(ctx context.Context, userID int64, offset, size int) ([]*note.NoteDTO, error)
 }
 
 type service struct {
@@ -57,4 +58,38 @@ func (s *service) HandleFanout(ctx context.Context, ev mq.FanoutEvent) error {
 		}
 	}
 	return nil
+}
+func (s *service) Inbox(ctx context.Context, userID int64, offset, size int) ([]*note.NoteDTO, error) {
+	if size <= 0 || size > 50 {
+		size = 20
+	}
+	// Redis ZSet 读信箱拿 IDs
+	strIDs, err := s.rdb.ZRangeArgs(ctx, redis.ZRangeArgs{Key: InboxKey(userID), Start: int64(offset), Stop: int64(offset + size - 1), Rev: true}).Result()
+	if err != nil {
+		return nil, err
+	}
+	// []string 转 []int
+	ids := make([]int64, 0, len(strIDs))
+	for _, s2 := range strIDs {
+		if id, err := strconv.ParseInt(s2, 10, 64); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	// 从数据库拿到实际存在的 notes
+	ns, err := s.notes.BatchByIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	// 重排并组合
+	tmp := make(map[int64]*note.NoteDTO, len(ns))
+	for _, n := range ns {
+		tmp[n.ID] = n
+	}
+	out := make([]*note.NoteDTO, 0, len(ids))
+	for _, id := range ids {
+		if n, ok := tmp[id]; ok {
+			out = append(out, n)
+		}
+	}
+	return out, nil
 }
