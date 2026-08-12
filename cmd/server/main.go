@@ -1,3 +1,11 @@
+// @title xhs-demo API
+// @version 1.0
+// @description 小红书 demo 后端：推模式 Feed + Redis 计数 + MQ 异步落库
+// @host localhost:8080
+// @BasePath /api/v1
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
 package main
 
 import (
@@ -18,7 +26,10 @@ import (
 	"xbs/internal/pkg/storage"
 	"xbs/internal/user"
 
+	_ "xbs/docs/swagger"
 	"github.com/gin-gonic/gin"
+	ginSwagger "github.com/swaggo/gin-swagger"
+	swaggerFiles "github.com/swaggo/files"
 )
 
 func main() {
@@ -49,6 +60,7 @@ func main() {
 		response.OK(c, gin.H{"status": "ok"})
 		//response.OK(c, gin.H{"status": "ok"})
 	})
+	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 	userSvc := user.NewService(user.NewRepository(gormDB), cfg.JWT.Secret, time.Duration(cfg.JWT.ExpireHours)*time.Hour)
 	user.RegisterRoutes(r.Group("/api/v1"), user.NewHandler(userSvc), cfg.JWT.Secret)
 	m, err := mq.New(cfg.RabbitMQ.URL)

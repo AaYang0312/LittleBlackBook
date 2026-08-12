@@ -1,3 +1,12 @@
+// Publish 发布笔记
+// @Summary 发布笔记
+// @Tags note
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param request body publishReq true "笔记内容"
+// @Success 200 {object} response.body
+// @Router /notes [post]
 package note
 
 import (

@@ -1,7 +1,8 @@
 bin/
 .env
 .DS_Store
-/docs/
+/docs/*
+!/docs/swagger/
 .idea/
 go.mod
 go.sum

@@ -14,7 +14,7 @@ func RegisterRoutes(rg *gin.RouterGroup, h *Handler, jwtSecret string) {
 	auth.DELETE("/notes/:id/like", h.Unlike)
 	auth.POST("/notes/:id/collect", h.Collect)
 	auth.DELETE("/notes/:id/collect", h.Uncollect)
-	auth.POST("/users/:id/comments", h.CreateComment)
-	auth.GET("/users/:id/comments", h.ListComments)
+	auth.POST("/notes/:id/comments", h.CreateComment)
+	auth.GET("/notes/:id/comments", h.ListComments)
 	rg.POST("/internal/rebuild-counts", h.RebuildCounts)
 }

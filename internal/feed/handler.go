@@ -14,6 +14,15 @@ type Handler struct {
 
 func NewHandler(svc Service) *Handler { return &Handler{svc: svc} }
 
+// Following 关注页 Feed
+// @Summary 关注页 Feed
+// @Tags feed
+// @Produce json
+// @Security BearerAuth
+// @Param offset query int false "偏移量"
+// @Param size query int false "每页条数"
+// @Success 200 {object} response.body
+// @Router /feed/following [get]
 func (h *Handler) Following(c *gin.Context) {
 	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
 	size, _ := strconv.Atoi(c.DefaultQuery("size", "20"))

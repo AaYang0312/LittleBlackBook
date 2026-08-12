@@ -8,5 +8,8 @@ run-worker:
 	go run ./cmd/worker
 test:
 	go test ./...
+swagger:
+	swag init -g cmd/server/main.go -o docs/swagger
+
 e2e:
 	bash scripts/e2e.sh

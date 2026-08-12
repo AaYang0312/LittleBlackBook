@@ -1,0 +1,316 @@
+basePath: /api/v1
+definitions:
+  interaction.commentReq:
+    properties:
+      content:
+        type: string
+    required:
+    - content
+    type: object
+  response.body:
+    properties:
+      code:
+        type: integer
+      data: {}
+      message:
+        type: string
+    type: object
+  user.loginReq:
+    properties:
+      password:
+        type: string
+      username:
+        type: string
+    required:
+    - password
+    - username
+    type: object
+  user.registerReq:
+    properties:
+      nickname:
+        type: string
+      password:
+        minLength: 6
+        type: string
+      username:
+        type: string
+    required:
+    - password
+    - username
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: 小红书 demo 后端：推模式 Feed + Redis 计数 + MQ 异步落库
+  title: xhs-demo API
+  version: "1.0"
+paths:
+  /feed/following:
+    get:
+      parameters:
+      - description: 偏移量
+        in: query
+        name: offset
+        type: integer
+      - description: 每页条数
+        in: query
+        name: size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.body'
+      security:
+      - BearerAuth: []
+      summary: 关注页 Feed
+      tags:
+      - feed
+  /internal/rebuild-counts:
+    post:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.body'
+      summary: 重建计数（内网接口）
+      tags:
+      - interaction
+  /notes/{id}/collect:
+    delete:
+      parameters:
+      - description: 笔记ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.body'
+      security:
+      - BearerAuth: []
+      summary: 取消收藏
+      tags:
+      - interaction
+    post:
+      parameters:
+      - description: 笔记ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.body'
+      security:
+      - BearerAuth: []
+      summary: 收藏笔记
+      tags:
+      - interaction
+  /notes/{id}/comments:
+    get:
+      parameters:
+      - description: 笔记ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 游标
+        in: query
+        name: cursor
+        type: integer
+      - description: 每页条数
+        in: query
+        name: size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.body'
+      security:
+      - BearerAuth: []
+      summary: 评论列表（游标分页）
+      tags:
+      - interaction
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 笔记ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 评论内容
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/interaction.commentReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.body'
+      security:
+      - BearerAuth: []
+      summary: 评论笔记
+      tags:
+      - interaction
+  /notes/{id}/like:
+    delete:
+      parameters:
+      - description: 笔记ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.body'
+      security:
+      - BearerAuth: []
+      summary: 取消点赞
+      tags:
+      - interaction
+    post:
+      parameters:
+      - description: 笔记ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.body'
+      security:
+      - BearerAuth: []
+      summary: 点赞
+      tags:
+      - interaction
+  /users/{id}/follow:
+    delete:
+      parameters:
+      - description: 目标用户ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.body'
+      security:
+      - BearerAuth: []
+      summary: 取消关注
+      tags:
+      - interaction
+    post:
+      parameters:
+      - description: 目标用户ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.body'
+      security:
+      - BearerAuth: []
+      summary: 关注用户
+      tags:
+      - interaction
+  /users/login:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 用户名/密码
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/user.loginReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.body'
+      summary: 登录
+      tags:
+      - user
+  /users/me:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.body'
+      security:
+      - BearerAuth: []
+      summary: 当前用户信息
+      tags:
+      - user
+  /users/register:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 用户名/密码
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/user.registerReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.body'
+      summary: 注册
+      tags:
+      - user
+securityDefinitions:
+  BearerAuth:
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"
