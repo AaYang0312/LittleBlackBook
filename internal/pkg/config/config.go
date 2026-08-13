@@ -22,11 +22,12 @@ type Config struct {
 		URL string `yaml:"url"`
 	} `yaml:"rabbitmq"`
 	MinIO struct {
-		Endpoint  string `yaml:"endpoint"`
-		AccessKey string `yaml:"access_key"`
-		SecretKey string `yaml:"secret_key"`
-		Bucket    string `yaml:"bucket"`
-		UseSSL    bool   `yaml:"use_ssl"`
+		Endpoint       string `yaml:"endpoint"`
+		PublicEndpoint string `yaml:"public_endpoint"`
+		AccessKey      string `yaml:"access_key"`
+		SecretKey      string `yaml:"secret_key"`
+		Bucket         string `yaml:"bucket"`
+		UseSSL         bool   `yaml:"use_ssl"`
 	} `yaml:"minio"`
 	JWT struct {
 		Secret      string `yaml:"secret"`

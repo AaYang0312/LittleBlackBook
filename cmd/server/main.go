@@ -69,7 +69,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer m.Close()
-	st, err := storage.NewMinIO(cfg.MinIO.Endpoint, cfg.MinIO.AccessKey, cfg.MinIO.SecretKey, cfg.MinIO.Bucket, cfg.MinIO.UseSSL)
+	st, err := storage.NewMinIO(cfg.MinIO.Endpoint, cfg.MinIO.PublicEndpoint, cfg.MinIO.AccessKey, cfg.MinIO.SecretKey, cfg.MinIO.Bucket, cfg.MinIO.UseSSL)
 	if err != nil {
 		slog.Error("连接 MinIO", "err", err)
 		os.Exit(1)

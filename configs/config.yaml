@@ -10,6 +10,7 @@ rabbitmq:
   url: "amqp://guest:guest@127.0.0.1:5672/"
 minio:
   endpoint: "127.0.0.1:9000"
+  public_endpoint: "10.0.2.2:9000"
   access_key: "minioadmin"
   secret_key: "minioadmin"
   bucket: "xhs-images"
