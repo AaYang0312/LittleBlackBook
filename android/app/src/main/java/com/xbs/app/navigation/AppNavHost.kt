@@ -24,6 +24,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.navArgument
 import com.xbs.app.ui.auth.LoginScreen
 import com.xbs.app.ui.auth.RegisterScreen
+import com.xbs.app.ui.detail.DetailScreen
 import com.xbs.app.ui.discover.DiscoverScreen
 import com.xbs.app.ui.following.FollowingScreen
 
@@ -78,7 +79,12 @@ fun AppNavHost(navController: NavHostController, startDestination: String) {
             composable(
                 route = Routes.DETAIL,
                 arguments = listOf(navArgument(Routes.ARG_NOTE_ID) { type = NavType.LongType }),
-            ) { StubScreen("详情") }                              // TASK-REPLACE: Task 9 DetailScreen
+            ) { entry ->
+                DetailScreen(
+                    noteId = entry.arguments?.getLong(Routes.ARG_NOTE_ID) ?: 0L,
+                    navController = navController,
+                )
+            }
         }
     }
 }
