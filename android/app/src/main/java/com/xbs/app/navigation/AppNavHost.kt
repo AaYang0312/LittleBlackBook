@@ -27,6 +27,7 @@ import com.xbs.app.ui.auth.RegisterScreen
 import com.xbs.app.ui.detail.DetailScreen
 import com.xbs.app.ui.discover.DiscoverScreen
 import com.xbs.app.ui.following.FollowingScreen
+import com.xbs.app.ui.publish.PublishScreen
 
 /** 临时占位页，后续 Task 逐个替换（搜索 TASK-REPLACE）。 */
 @Composable
@@ -75,7 +76,7 @@ fun AppNavHost(navController: NavHostController, startDestination: String) {
             composable(Routes.DISCOVER) { DiscoverScreen(navController) }
             composable(Routes.FOLLOWING) { FollowingScreen(navController) }
             composable(Routes.PROFILE) { StubScreen("我的") }    // TASK-REPLACE: Task 11 ProfileScreen
-            composable(Routes.PUBLISH) { StubScreen("发布") }    // TASK-REPLACE: Task 10 PublishScreen
+            composable(Routes.PUBLISH) { PublishScreen(navController) }
             composable(
                 route = Routes.DETAIL,
                 arguments = listOf(navArgument(Routes.ARG_NOTE_ID) { type = NavType.LongType }),
