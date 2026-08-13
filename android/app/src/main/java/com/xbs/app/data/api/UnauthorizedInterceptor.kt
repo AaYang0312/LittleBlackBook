@@ -11,8 +11,9 @@ class UnauthorizedInterceptor @Inject constructor(
     private val authEventBus: AuthEventBus,
 ) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
+        val hadToken = !runBlocking { tokenStore.token() }.isNullOrBlank()
         val resp = chain.proceed(chain.request())
-        if (resp.code == 401) {
+        if (resp.code == 401 && hadToken) {
             runBlocking { tokenStore.clear() }
             authEventBus.emitUnauthorized()
         }

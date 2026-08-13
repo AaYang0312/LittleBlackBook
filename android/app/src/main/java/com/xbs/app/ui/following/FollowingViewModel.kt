@@ -33,7 +33,7 @@ class FollowingViewModel @Inject constructor(
     init { refresh() }
 
     fun refresh() {
-        if (_uiState.value.isRefreshing) return
+        if (_uiState.value.isRefreshing || _uiState.value.isLoadingMore) return
         viewModelScope.launch {
             _uiState.update { it.copy(isRefreshing = true, loadMoreError = false) }
             repo.following(offset = 0, size = PAGE_SIZE)

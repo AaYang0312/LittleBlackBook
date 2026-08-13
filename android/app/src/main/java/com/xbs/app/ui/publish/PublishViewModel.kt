@@ -55,7 +55,7 @@ class PublishViewModel @Inject constructor(
             // 逐张上传，任一失败即终止
             val urls = mutableListOf<String>()
             for ((i, uri) in uris.withIndex()) {
-                val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                val bytes = runCatching { contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
                 if (bytes == null) {
                     _uiState.update { it.copy(isPublishing = false, error = "读取图片失败") }
                     return@launch
