@@ -7,3 +7,5 @@ bin/
 go.mod
 go.sum
 /.pi
+# worktrees (superpowers isolated workspaces)
+.worktrees/
