@@ -25,6 +25,7 @@ import androidx.navigation.navArgument
 import com.xbs.app.ui.auth.LoginScreen
 import com.xbs.app.ui.auth.RegisterScreen
 import com.xbs.app.ui.discover.DiscoverScreen
+import com.xbs.app.ui.following.FollowingScreen
 
 /** 临时占位页，后续 Task 逐个替换（搜索 TASK-REPLACE）。 */
 @Composable
@@ -71,7 +72,7 @@ fun AppNavHost(navController: NavHostController, startDestination: String) {
             composable(Routes.LOGIN) { LoginScreen(navController) }
             composable(Routes.REGISTER) { RegisterScreen(navController) }
             composable(Routes.DISCOVER) { DiscoverScreen(navController) }
-            composable(Routes.FOLLOWING) { StubScreen("关注") }  // TASK-REPLACE: Task 8 FollowingScreen
+            composable(Routes.FOLLOWING) { FollowingScreen(navController) }
             composable(Routes.PROFILE) { StubScreen("我的") }    // TASK-REPLACE: Task 11 ProfileScreen
             composable(Routes.PUBLISH) { StubScreen("发布") }    // TASK-REPLACE: Task 10 PublishScreen
             composable(
