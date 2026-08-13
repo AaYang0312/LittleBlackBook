@@ -22,6 +22,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.navArgument
+import com.xbs.app.ui.auth.LoginScreen
+import com.xbs.app.ui.auth.RegisterScreen
 
 /** 临时占位页，后续 Task 逐个替换（搜索 TASK-REPLACE）。 */
 @Composable
@@ -65,8 +67,8 @@ fun AppNavHost(navController: NavHostController, startDestination: String) {
             startDestination = startDestination,
             modifier = Modifier.padding(padding),
         ) {
-            composable(Routes.LOGIN) { StubScreen("登录") }       // TASK-REPLACE: Task 6 LoginScreen
-            composable(Routes.REGISTER) { StubScreen("注册") }   // TASK-REPLACE: Task 6 RegisterScreen
+            composable(Routes.LOGIN) { LoginScreen(navController) }
+            composable(Routes.REGISTER) { RegisterScreen(navController) }
             composable(Routes.DISCOVER) { StubScreen("发现") }   // TASK-REPLACE: Task 7 DiscoverScreen
             composable(Routes.FOLLOWING) { StubScreen("关注") }  // TASK-REPLACE: Task 8 FollowingScreen
             composable(Routes.PROFILE) { StubScreen("我的") }    // TASK-REPLACE: Task 11 ProfileScreen
