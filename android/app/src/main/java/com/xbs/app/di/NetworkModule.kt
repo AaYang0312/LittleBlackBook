@@ -12,6 +12,10 @@ import com.xbs.app.data.api.UnauthorizedInterceptor
 import com.xbs.app.data.api.UserApi
 import com.xbs.app.data.local.DataStoreTokenStore
 import com.xbs.app.data.local.TokenStore
+import com.xbs.app.data.repository.FeedRepository
+import com.xbs.app.data.repository.InteractionRepository
+import com.xbs.app.data.repository.NoteRepository
+import com.xbs.app.data.repository.UserRepository
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
@@ -64,4 +68,19 @@ object NetworkModule {
     @Provides @Singleton fun provideNoteApi(r: Retrofit): NoteApi = r.create(NoteApi::class.java)
     @Provides @Singleton fun provideFeedApi(r: Retrofit): FeedApi = r.create(FeedApi::class.java)
     @Provides @Singleton fun provideInteractionApi(r: Retrofit): InteractionApi = r.create(InteractionApi::class.java)
+}
+
+@Module
+@InstallIn(SingletonComponent::class)
+object RepositoryModule {
+
+    @Provides @Singleton fun provideUserRepository(api: UserApi, tokenStore: TokenStore): UserRepository =
+        UserRepository(api, tokenStore)
+
+    @Provides @Singleton fun provideNoteRepository(api: NoteApi): NoteRepository = NoteRepository(api)
+
+    @Provides @Singleton fun provideFeedRepository(api: FeedApi): FeedRepository = FeedRepository(api)
+
+    @Provides @Singleton fun provideInteractionRepository(api: InteractionApi): InteractionRepository =
+        InteractionRepository(api)
 }
