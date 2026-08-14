@@ -3,8 +3,13 @@ package user
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
+	"path"
 	"time"
 	"xbs/internal/pkg/errs"
+	"xbs/internal/pkg/snowflake"
+	"xbs/internal/pkg/storage"
 
 	"github.com/golang-jwt/jwt/v5"
 
@@ -17,17 +22,21 @@ type Service interface {
 	Login(ctx context.Context, username, password string) (string, error)
 	Profile(ctx context.Context, id int64) (*User, error)
 	BatchFindByIDs(ctx context.Context, ids []int64) (map[int64]*Author, error)
+	UpdateProfile(ctx context.Context, id int64, nickname, bio, avatarURL *string) (*User, error)
+	UploadAvatar(ctx context.Context, UserID int64, reader io.Reader, size int64, filename string) (string, error)
 }
 
 type service struct {
 	repo   Repository
+	st     storage.Storage
 	secret string
 	expire time.Duration
 }
 
-func NewService(repo Repository, jwtSecret string, expire time.Duration) Service {
+func NewService(repo Repository, st storage.Storage, jwtSecret string, expire time.Duration) Service {
 	return &service{
 		repo:   repo,
+		st:     st,
 		secret: jwtSecret,
 		expire: expire,
 	}
@@ -90,4 +99,30 @@ func (s *service) BatchFindByIDs(ctx context.Context, ids []int64) (map[int64]*A
 		}
 	}
 	return out, nil
+}
+func (s *service) UpdateProfile(ctx context.Context, id int64, nickname, bio, avatarURL *string) (*User, error) {
+	if nickname == nil && bio == nil && avatarURL == nil {
+		return nil, errs.ErrParam
+	}
+	fields := map[string]any{}
+	if nickname != nil {
+		fields["nickname"] = *nickname
+	}
+	if bio != nil {
+		fields["bio"] = *bio
+	}
+	if avatarURL != nil {
+		fields["avatar_url"] = *avatarURL
+	}
+	return s.repo.Patch(ctx, id, fields)
+}
+func (s *service) UploadAvatar(ctx context.Context, userID int64, reader io.Reader, size int64, filename string) (string, error) {
+	if s.st == nil {
+		return "", errs.ErrInternal
+	}
+	if size <= 0 || size > 10<<20 {
+		return "", errs.ErrParam
+	}
+	objectName := fmt.Sprintf("avatars/%d/%d%s", userID, snowflake.NextID(), path.Ext(filename))
+	return s.st.Upload(ctx, reader, size, objectName, "image/jpeg")
 }

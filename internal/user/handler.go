@@ -19,6 +19,11 @@ type registerReq struct {
 	Password string `json:"password" binding:"required,min=6"`
 	Nickname string `json:"nickname"`
 }
+type updateReq struct {
+	Nickname  *string `json:"nickname"`
+	Bio       *string `json:"bio"`
+	AvatarURL *string `json:"avatar_url"`
+}
 
 // Register 注册
 // @Summary 注册
@@ -83,4 +88,56 @@ func (h *Handler) Me(c *gin.Context) {
 		return
 	}
 	response.OK(c, u)
+}
+
+// UpdateMe 修改资料
+// @Summary 修改当前用户资料
+// @Tags user
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param request body updateReq true "昵称/签名/头像URL（可选，未传不动）"
+// @Success 200 {object} response.body
+// @Router /users/me [put]
+func (h *Handler) UpdateMe(c *gin.Context) {
+	var req updateReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, errs.ErrParam)
+		return
+	}
+	u, err := h.svc.UpdateProfile(c.Request.Context(), middleware.CurrentUserID(c), req.Nickname, req.Bio, req.AvatarURL)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, u)
+}
+
+// UploadAvatar 上传头像
+// @Summary 上传当前用户头像
+// @Tags user
+// @Accept multipart/form-data
+// @Produce json
+// @Security BearerAuth
+// @Param file formData file true "头像文件"
+// @Success 200 {object} response.body
+// @Router /users/me/avatar [post]
+func (h *Handler) UploadAvatar(c *gin.Context) {
+	f, err := c.FormFile("file")
+	if err != nil {
+		response.Fail(c, errs.ErrParam)
+		return
+	}
+	src, err := f.Open()
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	defer src.Close()
+	url, err := h.svc.UploadAvatar(c.Request.Context(), middleware.CurrentUserID(c), src, f.Size, f.Filename)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, gin.H{"url": url})
 }

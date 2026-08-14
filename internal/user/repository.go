@@ -11,6 +11,7 @@ type Repository interface {
 	FindByUsername(ctx context.Context, username string) (*User, error)
 	FindByID(ctx context.Context, id int64) (*User, error)
 	BatchFindByIDs(ctx context.Context, ids []int64) ([]*User, error)
+	Patch(ctx context.Context, id int64, fields map[string]any) (*User, error)
 }
 
 type gormRepo struct{ db *gorm.DB }
@@ -43,4 +44,13 @@ func (r *gormRepo) BatchFindByIDs(ctx context.Context, ids []int64) ([]*User, er
 	}
 	err := r.db.WithContext(ctx).Where("id IN ?", ids).Find(&out).Error
 	return out, err
+}
+func (r *gormRepo) Patch(ctx context.Context, id int64, fields map[string]any) (*User, error) {
+	if len(fields) == 0 {
+		return r.FindByID(ctx, id)
+	}
+	if err := r.db.WithContext(ctx).Model(&User{}).Where("id = ?", id).Updates(fields).Error; err != nil {
+		return nil, err
+	}
+	return r.FindByID(ctx, id)
 }
