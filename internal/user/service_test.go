@@ -63,3 +63,28 @@ func TestLoginWrongPassword(t *testing.T) {
 		t.Fatalf("want token, got err=%v", err)
 	}
 }
+func (f *fakeRepo) BatchFindByIDs(_ context.Context, ids []int64) ([]*User, error) {
+	var out []*User
+	for _, id := range ids {
+		if u, ok := f.byID[id]; ok {
+			out = append(out, u)
+		}
+	}
+	return out, nil
+}
+
+func TestBatchByIDs(t *testing.T) {
+	svc := NewService(newFakeRepo(), "secret", time.Hour)
+	u1, _ := svc.Register(context.Background(), "alice", "123456", "Alice")
+	u2, _ := svc.Register(context.Background(), "bob", "123456", "Bob")
+	got, err := svc.BatchFindByIDs(context.Background(), []int64{u1.ID, u2.ID, 999})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[u1.ID].Nickname != "Alice" {
+		t.Fatalf("bad batch: %+v", got)
+	}
+	if m, err := svc.BatchFindByIDs(context.Background(), nil); err != nil || len(m) != 0 {
+		t.Fatalf("empty batch err=%v len=%d", err, len(m))
+	}
+}

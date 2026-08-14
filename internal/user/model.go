@@ -16,3 +16,13 @@ type User struct {
 func (User) TableName() string {
 	return "users"
 }
+
+type Author struct {
+	ID        int64  `json:"id"`
+	Nickname  string `json:"nickname"`
+	AvatarURL string `json:"avatar_url"`
+}
+
+func (Author) TableName() string {
+	return "authors"
+}

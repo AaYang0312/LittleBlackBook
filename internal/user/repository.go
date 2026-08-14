@@ -10,6 +10,7 @@ type Repository interface {
 	Create(ctx context.Context, u *User) error
 	FindByUsername(ctx context.Context, username string) (*User, error)
 	FindByID(ctx context.Context, id int64) (*User, error)
+	BatchFindByIDs(ctx context.Context, ids []int64) ([]*User, error)
 }
 
 type gormRepo struct{ db *gorm.DB }
@@ -34,4 +35,12 @@ func (r *gormRepo) FindByID(ctx context.Context, id int64) (*User, error) {
 		return nil, err
 	}
 	return &user, nil
+}
+func (r *gormRepo) BatchFindByIDs(ctx context.Context, ids []int64) ([]*User, error) {
+	var out []*User
+	if len(ids) == 0 {
+		return out, nil
+	}
+	err := r.db.WithContext(ctx).Where("id IN ?", ids).Find(&out).Error
+	return out, err
 }

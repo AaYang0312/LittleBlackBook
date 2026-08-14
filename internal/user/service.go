@@ -16,6 +16,7 @@ type Service interface {
 	Register(ctx context.Context, username, password, nickname string) (*User, error)
 	Login(ctx context.Context, username, password string) (string, error)
 	Profile(ctx context.Context, id int64) (*User, error)
+	BatchFindByIDs(ctx context.Context, ids []int64) (map[int64]*Author, error)
 }
 
 type service struct {
@@ -71,4 +72,22 @@ func (s *service) Profile(ctx context.Context, id int64) (*User, error) {
 		return nil, errs.ErrUnauthorized
 	}
 	return u, nil
+}
+func (s *service) BatchFindByIDs(ctx context.Context, ids []int64) (map[int64]*Author, error) {
+	out := make(map[int64]*Author)
+	if len(ids) == 0 {
+		return out, nil
+	}
+	usrs, err := s.repo.BatchFindByIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for _, u := range usrs {
+		out[u.ID] = &Author{
+			ID:        u.ID,
+			Nickname:  u.Nickname,
+			AvatarURL: u.AvatarURL,
+		}
+	}
+	return out, nil
 }
