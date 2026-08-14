@@ -1,6 +1,9 @@
 package note
 
-import "time"
+import (
+	"time"
+	"xbs/internal/user"
+)
 
 type Note struct {
 	ID           int64     `gorm:"primaryKey" json:"id"`
@@ -20,16 +23,17 @@ type Note struct {
 func (Note) TableName() string { return "notes" }
 
 type NoteDTO struct {
-	ID           int64     `json:"id"`
-	UserID       int64     `json:"user_id"`
-	Title        string    `json:"title"`
-	Content      string    `json:"content"`
-	CoverURL     string    `json:"cover_url"`
-	Images       []string  `json:"images"`
-	LikeCount    int64     `json:"like_count"`
-	CollectCount int64     `json:"collect_count"`
-	CommentCount int64     `json:"comment_count"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID           int64        `json:"id"`
+	UserID       int64        `json:"user_id"`
+	Title        string       `json:"title"`
+	Content      string       `json:"content"`
+	CoverURL     string       `json:"cover_url"`
+	Images       []string     `json:"images"`
+	LikeCount    int64        `json:"like_count"`
+	CollectCount int64        `json:"collect_count"`
+	CommentCount int64        `json:"comment_count"`
+	CreatedAt    time.Time    `json:"created_at"`
+	Author       *user.Author `json:"author,omitempty"`
 }
 
 type Page struct {

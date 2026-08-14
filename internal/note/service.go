@@ -15,6 +15,7 @@ import (
 	"xbs/internal/pkg/mq"
 	"xbs/internal/pkg/snowflake"
 	"xbs/internal/pkg/storage"
+	"xbs/internal/user"
 
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
@@ -30,17 +31,24 @@ type Service interface {
 	AddCountDelta(ctx context.Context, id int64, field string, delta int) error
 	ListAllIDs(ctx context.Context) ([]int64, error)
 	SetCounts(ctx context.Context, id int64, like, collect, comment int64) error
-}
-type service struct {
-	repo Repository
-	st   storage.Storage
-	m    *mq.MQ
-	rdb  *redis.Client
-	c    *cache.Cache
+	ListByUser(ctx context.Context, userID, cursor int64, size int) (*Page, error)
 }
 
-func NewService(repo Repository, st storage.Storage, m *mq.MQ, rdb *redis.Client, c *cache.Cache) Service {
-	return &service{repo: repo, st: st, m: m, rdb: rdb, c: c}
+type UserLookup interface {
+	BatchByIDs(ctx context.Context, ids []int64) (map[int64]*user.Author, error)
+}
+
+type service struct {
+	repo  Repository
+	st    storage.Storage
+	m     *mq.MQ
+	rdb   *redis.Client
+	c     *cache.Cache
+	users UserLookup
+}
+
+func NewService(repo Repository, st storage.Storage, m *mq.MQ, rdb *redis.Client, c *cache.Cache, users UserLookup) Service {
+	return &service{repo: repo, st: st, m: m, rdb: rdb, c: c, users: users}
 }
 func (s *service) Publish(ctx context.Context, userID int64, title, content string, images []string) (*Note, error) {
 	if title == "" || len(images) == 0 {
@@ -99,7 +107,9 @@ func (s *service) Detail(ctx context.Context, id int64) (*NoteDTO, error) {
 		}
 		// 缓存 DTO 而非 Note：Note.Images 等字段带 json:"-"（供 Publish 直接返回），
 		// 直接序列化 Note 会在缓存往返中丢失这些字段。
-		b, _ := json.Marshal(toDTO(n))
+		dto := toDTO(n)
+		s.enrichAuthors(ctx, []*NoteDTO{dto})
+		b, _ := json.Marshal(dto)
 		return string(b), nil
 	})
 	if err != nil {
@@ -123,6 +133,7 @@ func (s *service) BatchByIDs(ctx context.Context, ids []int64) ([]*NoteDTO, erro
 		s.overlayCounts(ctx, dto)
 		out = append(out, dto)
 	}
+	s.enrichAuthors(ctx, out)
 	return out, nil
 }
 func (s *service) Latest(ctx context.Context, cursor int64, size int) (*Page, error) {
@@ -146,6 +157,7 @@ func (s *service) Latest(ctx context.Context, cursor int64, size int) (*Page, er
 	if len(p.List) > 0 {
 		p.NextCursor = p.List[len(p.List)-1].ID
 	}
+	s.enrichAuthors(ctx, p.List)
 	return p, nil
 }
 func (s *service) UploadImage(ctx context.Context, userID int64, reader io.Reader, size int64, filename string) (string, error) {
@@ -172,4 +184,56 @@ func (s *service) AddCountDelta(ctx context.Context, id int64, field string, del
 func (s *service) ListAllIDs(ctx context.Context) ([]int64, error) { return s.repo.ListAllIDs(ctx) }
 func (s *service) SetCounts(ctx context.Context, id int64, like, collect, comment int64) error {
 	return s.repo.SetCounts(ctx, id, like, collect, comment)
+}
+func (s *service) enrichAuthors(ctx context.Context, dtos []*NoteDTO) {
+	if s.users == nil {
+		return
+	}
+	ids := make(map[int64]struct{}, len(dtos))
+	for _, d := range dtos {
+		if d.UserID > 0 {
+			ids[d.UserID] = struct{}{}
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	list := make([]int64, 0, len(ids))
+	for id := range ids {
+		list = append(list, id)
+	}
+	authors, err := s.users.BatchByIDs(ctx, list)
+	if err != nil {
+		return
+	}
+	for _, d := range dtos {
+		if a, ok := authors[d.UserID]; ok {
+			d.Author = a
+		}
+	}
+}
+
+func (s *service) ListByUser(ctx context.Context, userID, cursor int64, size int) (*Page, error) {
+	if size <= 0 || size > 50 {
+		size = 20
+	}
+	ns, err := s.repo.ListByUser(ctx, userID, cursor, size)
+	if err != nil {
+		return nil, err
+	}
+	p := &Page{}
+	if len(ns) > size {
+		p.HasMore = true
+		ns = ns[:size]
+	}
+	for _, n := range ns {
+		dto := toDTO(n)
+		s.overlayCounts(ctx, dto)
+		p.List = append(p.List, dto)
+	}
+	s.enrichAuthors(ctx, p.List)
+	if len(p.List) > 0 {
+		p.NextCursor = p.List[len(p.List)-1].ID
+	}
+	return p, nil
 }

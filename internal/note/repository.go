@@ -15,6 +15,7 @@ type Repository interface {
 	AddCountDelta(ctx context.Context, id int64, field string, delta int) error
 	ListAllIDs(ctx context.Context) ([]int64, error)
 	SetCounts(ctx context.Context, id int64, like, collect, comment int64) error
+	ListByUser(ctx context.Context, userID, cursor int64, size int) ([]*Note, error)
 }
 type gormRepo struct{ db *gorm.DB }
 
@@ -74,4 +75,13 @@ func (r *gormRepo) SetCounts(ctx context.Context, id int64, like, collect, comme
 	return r.db.WithContext(ctx).Model(&Note{}).Where("id = ?", id).Updates(map[string]any{
 		"like_count": like, "collect_count": collect, "comment_count": comment,
 	}).Error
+}
+func (r *gormRepo) ListByUser(ctx context.Context, userID, cursor int64, size int) ([]*Note, error) {
+	var ns []*Note
+	q := r.db.WithContext(ctx).Where("user_id = ? AND status = 0", userID)
+	if cursor > 0 {
+		q = q.Where("id < ?", cursor)
+	}
+	err := q.Order("id DESC").Limit(size + 1).Find(&ns).Error
+	return ns, err
 }

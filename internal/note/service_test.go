@@ -8,6 +8,7 @@ import (
 	"testing"
 	"xbs/internal/pkg/cache"
 	"xbs/internal/pkg/db"
+	"xbs/internal/user"
 
 	"github.com/alicebob/miniredis/v2"
 	"gorm.io/gorm"
@@ -80,7 +81,7 @@ func NewTestCache(t *testing.T) *cache.Cache {
 func TestPublishAndDetail(t *testing.T) {
 	_ = snowflake.Init(1)
 	repo := newFakeRepo()
-	svc := note.NewService(repo, fakeStorage{}, nil, nil, NewTestCache(t)) // mq=nil 时跳过 fanout 发布；rdb=nil 时跳过实时计数覆盖
+	svc := note.NewService(repo, fakeStorage{}, nil, nil, NewTestCache(t), nil) // mq=nil 时跳过 fanout 发布；rdb=nil 时跳过实时计数覆盖
 	n, err := svc.Publish(context.Background(), 7, "标题", "正文", []string{"http://minio/xhs-images/a.jpg"})
 	if err != nil {
 		t.Fatal(err)
@@ -99,7 +100,7 @@ func TestPublishAndDetail(t *testing.T) {
 
 func TestDetailNotFound(t *testing.T) {
 	_ = snowflake.Init(1)
-	svc := note.NewService(newFakeRepo(), fakeStorage{}, nil, nil, NewTestCache(t))
+	svc := note.NewService(newFakeRepo(), fakeStorage{}, nil, nil, NewTestCache(t), nil)
 	_, err := svc.Detail(context.Background(), 999)
 	if !errors.Is(err, errs.ErrNoteNotFound) {
 		t.Fatalf("want ErrNoteNotFound, got %v", err)
@@ -108,7 +109,7 @@ func TestDetailNotFound(t *testing.T) {
 
 func TestPublishRequiresImage(t *testing.T) {
 	_ = snowflake.Init(1)
-	svc := note.NewService(newFakeRepo(), fakeStorage{}, nil, nil, NewTestCache(t))
+	svc := note.NewService(newFakeRepo(), fakeStorage{}, nil, nil, NewTestCache(t), nil)
 	if _, err := svc.Publish(context.Background(), 7, "t", "c", nil); !errors.Is(err, errs.ErrParam) {
 		t.Fatalf("want ErrParam, got %v", err)
 	}
@@ -117,7 +118,7 @@ func TestPublishRequiresImage(t *testing.T) {
 func TestLatestPagination(t *testing.T) {
 	_ = snowflake.Init(1)
 	repo := newFakeRepo()
-	svc := note.NewService(repo, fakeStorage{}, nil, nil, NewTestCache(t))
+	svc := note.NewService(repo, fakeStorage{}, nil, nil, NewTestCache(t), nil)
 	for i := 0; i < 25; i++ {
 		if _, err := svc.Publish(context.Background(), 1, "title", "content", []string{"u"}); err != nil {
 			t.Fatal(err)
@@ -143,5 +144,80 @@ func TestLatestPagination(t *testing.T) {
 			t.Fatalf("duplicate across pages: %d", d.ID)
 		}
 		seen[d.ID] = true
+	}
+}
+func (f *fakeRepo) ListByUser(_ context.Context, userID, cursor int64, size int) ([]*note.Note, error) {
+	var all []*note.Note
+	for _, n := range f.byID {
+		if n.UserID == userID && n.Status == 0 && (cursor == 0 || n.ID < cursor) {
+			all = append(all, n)
+		}
+	}
+	sort.Slice(all, func(i, j int) bool {
+		return all[i].ID > all[j].ID
+	})
+	if len(all) > size+1 {
+		all = all[:size+1]
+	}
+	return all, nil
+}
+
+type fakeUserLookup struct{ byID map[int64]*user.Author }
+
+func (f fakeUserLookup) BatchByIDs(_ context.Context, ids []int64) (map[int64]*user.Author, error) {
+	out := map[int64]*user.Author{}
+	for _, id := range ids {
+		if a, ok := f.byID[id]; ok {
+			out[id] = a
+		}
+	}
+	return out, nil
+}
+
+func TestAuthorEnrichment(t *testing.T) {
+	_ = snowflake.Init(1)
+	repo := newFakeRepo()
+	lookup := fakeUserLookup{byID: map[int64]*user.Author{7: {ID: 7, Nickname: "小红", AvatarURL: "http://a"}}}
+	svc := note.NewService(repo, fakeStorage{}, nil, nil, NewTestCache(t), lookup)
+	n, err := svc.Publish(context.Background(), 7, "标题", "", []string{"u"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dto, err := svc.Detail(context.Background(), n.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dto.Author == nil || dto.Author.Nickname != "小红" {
+		t.Fatalf("detail author not enriched: %+v", dto.Author)
+	}
+	p, _ := svc.Latest(context.Background(), 0, 10)
+	if len(p.List) != 1 || p.List[0].Author == nil || p.List[0].Author.Nickname != "小红" {
+		t.Fatalf("latest author not enriched: %+v", p.List)
+	}
+}
+
+func TestListByUser(t *testing.T) {
+	_ = snowflake.Init(1)
+	repo := newFakeRepo()
+	svc := note.NewService(repo, fakeStorage{}, nil, nil, NewTestCache(t), nil) // users=nil 跳过回填
+	for i := 0; i < 3; i++ {
+		if _, err := svc.Publish(context.Background(), 7, "t", "c", []string{"u"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := svc.Publish(context.Background(), 9, "other", "", []string{"u"}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := svc.ListByUser(context.Background(), 7, 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.List) != 3 {
+		t.Fatalf("want 3 notes for user 7, got %d", len(p.List))
+	}
+	for _, d := range p.List {
+		if d.UserID != 7 {
+			t.Fatalf("leaked other user's note: %+v", d)
+		}
 	}
 }

@@ -64,6 +64,27 @@ func (h *Handler) Latest(c *gin.Context) {
 	response.OK(c, p)
 }
 
+// ListByUser 查看某用户的笔记列表
+// @Summary 某用户的笔记列表
+// @Tags note
+// @Produce json
+// @Param id path int true "用户ID"
+// @Param cursor query int false "游标（上一页最后一条 note id）"
+// @Param size query int false "每页数量（默认20，最大50）"
+// @Success 200 {object} response.body
+// @Router /users/:id/notes [get]
+func (h *Handler) ListByUser(c *gin.Context) {
+	uid, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	cursor, _ := strconv.ParseInt(c.Query("cursor"), 10, 64)
+	size, _ := strconv.Atoi(c.DefaultQuery("size", "20"))
+	p, err := h.svc.ListByUser(c.Request.Context(), uid, cursor, size)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, p)
+}
+
 func (h *Handler) UploadImage(c *gin.Context) {
 	f, err := c.FormFile("file")
 	if err != nil {
