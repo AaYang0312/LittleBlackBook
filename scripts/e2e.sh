@@ -75,8 +75,8 @@ RC=$(req GET "/notes/$NOTE_ID/comments" "$AT" | jq --argjson id "$TOP" '[.data[]
 [ "$RC" = "2" ] || { echo "top reply_count=$RC, want 2"; exit 1; }
 REPS=$(req GET "/notes/$NOTE_ID/comments/$TOP/replies" "$AT" | jq '.data | length')
 [ "$REPS" = "2" ] || { echo "replies=$REPS, want 2"; exit 1; }
-REPLY_TO_AUTHOR=$(req GET "/notes/$NOTE_ID/comments/$TOP/replies" "$AT" | jq -r '.data[1].reply_to_author.nickname')
-[ "$REPLY_TO_AUTHOR" = "$BOB" ] || { echo "reply_to_author=$REPLY_TO_AUTHOR, want $BOB"; exit 1; }
+REPLY_TO_AUTHOR=$(req GET "/notes/$NOTE_ID/comments/$TOP/replies" "$AT" | jq -r '.data[1].reply_to_author.id')
+[ "$REPLY_TO_AUTHOR" = "$BOB_ID" ] || { echo "reply_to_author=$REPLY_TO_AUTHOR, want $BOB_ID"; exit 1; }
 TOTAL_CC=$(req GET "/notes/$NOTE_ID" "" | jq -r '.data.comment_count')
 [ "$TOTAL_CC" = "4" ] || { echo "comment_count=$TOTAL_CC, want 4 (1 e2e + 1 top + 2 replies)"; exit 1; }
 # 不能回复一个回复
