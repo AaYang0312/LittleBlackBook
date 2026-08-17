@@ -49,9 +49,11 @@ make run-worker      # 启动 MQ worker（另开终端）
 make e2e             # 跑全链路验收脚本
 ```
 
+> 老库升级：执行 `sql/migrations/001_comments_threading.sql`（幂等，可重复执行）；全新库由 `make up` 自动执行 `sql/schema.sql` 建表。
+
 - Swagger 文档：http://localhost:8080/swagger/index.html
 - 健康检查：`curl localhost:8080/healthz`
-- 核心接口（前缀 `/api/v1`，除注册/登录/发现页外均需 `Authorization: Bearer <token>`）：
+- 核心接口（前缀 `/api/v1`；写操作与个人数据接口需 `Authorization: Bearer <token>`，笔记详情/发现页/用户笔记列表公开可读）：
 
 | 接口 | 说明 |
 |---|---|
@@ -110,6 +112,14 @@ worker 消费: INSERT IGNORE likes → UPDATE notes.like_count+1 → ack
 - 实时读永远以 Redis 计数为准；**MySQL 关系表（likes/collects/comments）是唯一事实源**
 - `POST /internal/rebuild-counts`：遍历全部笔记，从关系表 `COUNT(*)` 重建 Redis 计数与 notes 表计数列，用于 Redis 数据丢失后的恢复（幂等，失败即中断可重跑）
 
+### 6. 评论楼中楼与作者回填（DTO + 服务层 enrichment）
+
+- **两级模型**：`comments.parent_id`（0=顶级，>0=回复），回复只能挂在顶级评论下（"回复的回复"返回参数错误，与小红书一致）；`reply_count` 在创建回复时同步 `+1`，列表页免 count 查询
+- **计数语义**：`note.comment_count` 仍为总数（顶级+回复），走原有 `AddCountDelta` + Redis `INCR` 链路；`rebuild-counts` 的 `COUNT(*)` 语义不变
+- **作者回填**：`CommentDTO`/`NoteDTO` 带 `author`/`reply_to_author` 快照，服务层收集一页内所有 `user_id`/`reply_to` 去重后一次 `BatchByIDs` 批量查询回填，避免 N+1；跨模块只依赖 `UserLookup` 接口（`user.Service` 结构化满足），不 import 他人 repository
+- **快照与实时**：列表/评论不走缓存，作者实时新鲜；笔记 Detail 缓存含作者快照，改资料后最多 1h 才刷新（见已知取舍）
+- 话术："实体管持久化、DTO 管对外契约，服务层做聚合回填——模块边界干净、一次批量查询、敏感字段（如 PasswordHash）物理上不出模块。"
+
 ## 演进方向
 
 1. **推拉结合**：粉丝数超阈值的作者走拉模式，普通人走推模式，读时合并两路
@@ -127,5 +137,5 @@ worker 消费: INSERT IGNORE likes → UPDATE notes.like_count+1 → ack
 | `/internal/rebuild-counts` 无鉴权 | demo 内网接口，生产应加鉴权/网段限制 |
 | MinIO bucket 公共读 | demo 简化，生产应走签名 URL 私有读 |
 | `BatchByIDs` 未走缓存批量优化 | 详情批量读直接查库，演进：管道批量回填缓存 |
-| Detail 作者快照缓存 staleness | 改资料后详情页作者最多 1h 才刷新 | 接受；演进：改资料时失效该用户笔记缓存 |
+| Detail 作者快照缓存 staleness | 改资料后详情页作者最多 1h 才刷新；接受。演进：改资料时失效该用户笔记缓存 |
 | 单机雪花节点 | 生产多实例需按节点分配 ID 段或引入发号器 |
