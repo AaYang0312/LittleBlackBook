@@ -55,11 +55,13 @@ make e2e             # 跑全链路验收脚本
 
 | 接口 | 说明 |
 |---|---|
-| `POST /users/register` `POST /users/login` `GET /users/me` | 用户 |
+| `POST /users/register` `POST /users/login` `GET /users/me` `PUT /users/me` `POST /users/me/avatar` | 用户（注册/登录/资料/头像） |
 | `POST /notes` `GET /notes/{id}` `GET /notes/latest` `DELETE /notes/{id}` `POST /notes/images` | 笔记 |
+| `GET /users/{id}/notes` | 用户笔记列表（游标分页） |
 | `POST/DELETE /users/{id}/follow` | 关注/取关 |
 | `POST/DELETE /notes/{id}/like` `POST/DELETE /notes/{id}/collect` | 点赞/收藏（Redis 判重幂等） |
-| `POST/GET /notes/{id}/comments` | 评论 |
+| `POST /notes/{id}/comments` `GET /notes/{id}/comments` | 评论（POST 可选 `parent_id`/`reply_to`；GET 仅顶级评论，带 `reply_count`） |
+| `GET /notes/{id}/comments/{cid}/replies` | 展开回复（游标分页，正序） |
 | `GET /feed/following` | 关注页 Feed（推模式 inbox） |
 | `POST /internal/rebuild-counts` | 计数重建（内网接口，无 JWT） |
 
@@ -115,7 +117,7 @@ worker 消费: INSERT IGNORE likes → UPDATE notes.like_count+1 → ack
 3. **布隆过滤器**替代空值缓存；sentinel/熔断替代简单降级
 4. **模块边界即微服务边界**：service 接口换 RPC（go-zero/Kratos + gRPC），user/note/interaction/feed 拆为四个服务
 5. **Kafka 替换 RabbitMQ**（海量吞吐、消息回溯）
-6. **评论楼中楼**（parent_id）与分库分表
+6. **分库分表**
 
 ## 已知取舍（演进项）
 
@@ -125,4 +127,5 @@ worker 消费: INSERT IGNORE likes → UPDATE notes.like_count+1 → ack
 | `/internal/rebuild-counts` 无鉴权 | demo 内网接口，生产应加鉴权/网段限制 |
 | MinIO bucket 公共读 | demo 简化，生产应走签名 URL 私有读 |
 | `BatchByIDs` 未走缓存批量优化 | 详情批量读直接查库，演进：管道批量回填缓存 |
+| Detail 作者快照缓存 staleness | 改资料后详情页作者最多 1h 才刷新 | 接受；演进：改资料时失效该用户笔记缓存 |
 | 单机雪花节点 | 生产多实例需按节点分配 ID 段或引入发号器 |

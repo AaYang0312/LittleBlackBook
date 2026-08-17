@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"os"
+	"time"
 	"xbs/internal/feed"
 	"xbs/internal/interaction"
 	"xbs/internal/note"
@@ -13,6 +14,7 @@ import (
 	"xbs/internal/pkg/db"
 	"xbs/internal/pkg/mq"
 	"xbs/internal/pkg/snowflake"
+	"xbs/internal/user"
 )
 
 func main() {
@@ -39,8 +41,9 @@ func main() {
 	}
 	defer m.Close()
 
-	noteSvc := note.NewService(note.NewRepository(gormDB), nil, nil, rdb, cache.New(rdb))
-	interactionSvc := interaction.NewService(interaction.NewRepository(gormDB), rdb, m, noteSvc)
+	userSvc := user.NewService(user.NewRepository(gormDB), nil, cfg.JWT.Secret, time.Duration(cfg.JWT.ExpireHours)*time.Hour)
+	noteSvc := note.NewService(note.NewRepository(gormDB), nil, nil, rdb, cache.New(rdb), userSvc)
+	interactionSvc := interaction.NewService(interaction.NewRepository(gormDB), rdb, m, noteSvc, userSvc)
 
 	if err := m.Consume(mq.QueueLikeEvent, func(body []byte) error {
 		var ev mq.LikeEvent

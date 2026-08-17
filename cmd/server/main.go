@@ -61,7 +61,12 @@ func main() {
 		//response.OK(c, gin.H{"status": "ok"})
 	})
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
-	userSvc := user.NewService(user.NewRepository(gormDB), cfg.JWT.Secret, time.Duration(cfg.JWT.ExpireHours)*time.Hour)
+	st, err := storage.NewMinIO(cfg.MinIO.Endpoint, cfg.MinIO.PublicEndpoint, cfg.MinIO.AccessKey, cfg.MinIO.SecretKey, cfg.MinIO.Bucket, cfg.MinIO.UseSSL)
+	if err != nil {
+		slog.Error("连接 MinIO", "err", err)
+		os.Exit(1)
+	}
+	userSvc := user.NewService(user.NewRepository(gormDB), st, cfg.JWT.Secret, time.Duration(cfg.JWT.ExpireHours)*time.Hour)
 	user.RegisterRoutes(r.Group("/api/v1"), user.NewHandler(userSvc), cfg.JWT.Secret)
 	m, err := mq.New(cfg.RabbitMQ.URL)
 	if err != nil {
@@ -69,18 +74,13 @@ func main() {
 		os.Exit(1)
 	}
 	defer m.Close()
-	st, err := storage.NewMinIO(cfg.MinIO.Endpoint, cfg.MinIO.PublicEndpoint, cfg.MinIO.AccessKey, cfg.MinIO.SecretKey, cfg.MinIO.Bucket, cfg.MinIO.UseSSL)
-	if err != nil {
-		slog.Error("连接 MinIO", "err", err)
-		os.Exit(1)
-	}
 	if err := snowflake.Init(cfg.Snowflake.Node); err != nil {
 		slog.Error("初始化 Snowflake", "err", err)
 		os.Exit(1)
 	}
-	noteSvc := note.NewService(note.NewRepository(gormDB), st, m, rdb, cache.New(rdb))
+	noteSvc := note.NewService(note.NewRepository(gormDB), st, m, rdb, cache.New(rdb), userSvc)
 	note.RegisterRoutes(r.Group("/api/v1"), note.NewHandler(noteSvc), cfg.JWT.Secret)
-	interactionSvc := interaction.NewService(interaction.NewRepository(gormDB), rdb, m, noteSvc)
+	interactionSvc := interaction.NewService(interaction.NewRepository(gormDB), rdb, m, noteSvc, userSvc)
 	interaction.RegisterRoutes(r.Group("/api/v1"), interaction.NewHandler(interactionSvc), cfg.JWT.Secret)
 	feedSvc := feed.NewService(rdb, noteSvc, interactionSvc, 500)
 	feed.RegisterRoutes(r.Group("/api/v1"), feed.NewHandler(feedSvc), cfg.JWT.Secret)

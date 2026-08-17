@@ -224,6 +224,58 @@ const docTemplate = `{
                 }
             }
         },
+        "/notes/{id}/comments/{cid}/replies": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "interaction"
+                ],
+                "summary": "评论回复列表（游标分页，时间正序）",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "笔记ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "顶级评论ID",
+                        "name": "cid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "游标（已加载最后一条回复id）",
+                        "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页条数",
+                        "name": "size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/response.body"
+                        }
+                    }
+                }
+            }
+        },
         "/notes/{id}/like": {
             "post": {
                 "security": [
@@ -288,6 +340,46 @@ const docTemplate = `{
                 }
             }
         },
+        "/users/:id/notes": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "note"
+                ],
+                "summary": "某用户的笔记列表",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "用户ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "游标（上一页最后一条 note id）",
+                        "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页数量（默认20，最大50）",
+                        "name": "size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/response.body"
+                        }
+                    }
+                }
+            }
+        },
         "/users/login": {
             "post": {
                 "consumes": [
@@ -335,6 +427,78 @@ const docTemplate = `{
                     "user"
                 ],
                 "summary": "当前用户信息",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/response.body"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "user"
+                ],
+                "summary": "修改当前用户资料",
+                "parameters": [
+                    {
+                        "description": "昵称/签名/头像URL（可选，未传不动）",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/user.updateReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/response.body"
+                        }
+                    }
+                }
+            }
+        },
+        "/users/me/avatar": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "user"
+                ],
+                "summary": "上传当前用户头像",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "头像文件",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -452,6 +616,12 @@ const docTemplate = `{
             "properties": {
                 "content": {
                     "type": "string"
+                },
+                "parent_id": {
+                    "type": "integer"
+                },
+                "reply_to": {
+                    "type": "integer"
                 }
             }
         },
@@ -497,6 +667,20 @@ const docTemplate = `{
                     "minLength": 6
                 },
                 "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "user.updateReq": {
+            "type": "object",
+            "properties": {
+                "avatar_url": {
+                    "type": "string"
+                },
+                "bio": {
+                    "type": "string"
+                },
+                "nickname": {
                     "type": "string"
                 }
             }
