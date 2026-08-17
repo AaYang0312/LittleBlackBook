@@ -32,6 +32,8 @@ func Fail(c *gin.Context, err error) {
 			status = http.StatusNotFound
 		case errs.ErrForbidden.Code:
 			status = http.StatusForbidden
+		case errs.ErrCommentNotFound.Code:
+			status = http.StatusNotFound
 		}
 		c.JSON(status, body{
 			Code:    e.Code,

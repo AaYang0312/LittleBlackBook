@@ -57,3 +57,12 @@ func indexOf(s, sub string) int {
 	}
 	return -1
 }
+func TestFailCommentNotFound(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	response.Fail(c, errs.ErrCommentNotFound)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("want 404, got %d", w.Code)
+	}
+}

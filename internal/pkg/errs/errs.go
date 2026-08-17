@@ -20,4 +20,5 @@ var (
 	ErrLikeNotFound    = New(3004, "点赞记录不存在")
 	ErrCollectNotFound = New(3005, "收藏记录不存在")
 	ErrInternal        = New(5000, "服务器内部错误")
+	ErrCommentNotFound = New(3006, "评论不存在")
 )
