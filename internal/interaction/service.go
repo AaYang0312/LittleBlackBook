@@ -7,6 +7,7 @@ import (
 	"xbs/internal/pkg/errs"
 	"xbs/internal/pkg/mq"
 	"xbs/internal/pkg/snowflake"
+	"xbs/internal/user"
 
 	mysqlDriver "github.com/go-sql-driver/mysql"
 	"github.com/redis/go-redis/v9"
@@ -24,16 +25,22 @@ type Service interface {
 
 	ApplyLikeEvent(ctx context.Context, ev mq.LikeEvent) error
 	//
-	CreateComment(ctx context.Context, userID, noteID int64, content string) (*Comment, error)
-	ListComments(ctx context.Context, noteID, cursor int64, size int) ([]*Comment, error)
+	CreateComment(ctx context.Context, userID, noteID int64, content string, parentID, replyTo int64) (*CommentDTO, error)
+	ListComments(ctx context.Context, noteID, cursor int64, size int) ([]*CommentDTO, error)
+	ListReplies(ctx context.Context, noteID, parentID, cursor int64, size int) ([]*CommentDTO, error)
 	//
 	RebuildCounts(ctx context.Context) error
 }
+type UserLookup interface {
+	BatchByIDs(ctx context.Context, ids []int64) (map[int64]*user.Author, error)
+}
+
 type service struct {
 	repos   *Repos
 	rdb     *redis.Client
 	m       *mq.MQ
 	noteSvc noteCounter
+	users   UserLookup
 	publish func(ctx context.Context, ev mq.LikeEvent) error
 }
 type noteCounter interface {
@@ -42,8 +49,8 @@ type noteCounter interface {
 	SetCounts(ctx context.Context, id int64, like, collect, comment int64) error
 }
 
-func NewService(repos *Repos, rdb *redis.Client, m *mq.MQ, noteSvc noteCounter) Service {
-	svc := &service{repos: repos, rdb: rdb, m: m, noteSvc: noteSvc}
+func NewService(repos *Repos, rdb *redis.Client, m *mq.MQ, noteSvc noteCounter, users UserLookup) Service {
+	svc := &service{repos: repos, rdb: rdb, m: m, noteSvc: noteSvc, users: users}
 	svc.publish = func(ctx context.Context, ev mq.LikeEvent) error {
 		if m == nil {
 			return nil
@@ -54,8 +61,8 @@ func NewService(repos *Repos, rdb *redis.Client, m *mq.MQ, noteSvc noteCounter) 
 }
 
 // NewServiceForTest 注入 publish 便于单测
-func NewServiceForTest(repos *Repos, rdb *redis.Client, publish func(ctx context.Context, ev mq.LikeEvent) error, noteSvc noteCounter) Service {
-	return &service{repos: repos, rdb: rdb, publish: publish, noteSvc: noteSvc}
+func NewServiceForTest(repos *Repos, rdb *redis.Client, publish func(ctx context.Context, ev mq.LikeEvent) error, noteSvc noteCounter, users UserLookup) Service {
+	return &service{repos: repos, rdb: rdb, publish: publish, noteSvc: noteSvc, users: users}
 }
 func (s *service) Follow(ctx context.Context, me, target int64) error {
 	if me == target || me == 0 || target == 0 {
@@ -145,19 +152,78 @@ func (s *service) ApplyLikeEvent(c context.Context, ev mq.LikeEvent) error {
 	}
 	return s.noteSvc.AddCountDelta(c, ev.NoteID, field, -1)
 }
-func (s *service) CreateComment(ctx context.Context, userID, noteID int64, content string) (*Comment, error) {
+func (s *service) toCommentDTO(c *Comment) *CommentDTO {
+	return &CommentDTO{
+		ID: c.ID, NoteID: c.NoteID, UserID: c.UserID, Content: c.Content,
+		ParentID: c.ParentID, ReplyTo: c.ReplyTo, ReplyCount: c.ReplyCount,
+		CreatedAt: c.CreatedAt,
+	}
+}
+
+func (s *service) enrichComments(ctx context.Context, dtos []*CommentDTO) {
+	if s.users == nil {
+		return
+	}
+	ids := map[int64]struct{}{}
+	for _, d := range dtos {
+		if d.UserID > 0 {
+			ids[d.UserID] = struct{}{}
+		}
+		if d.ReplyTo > 0 {
+			ids[d.ReplyTo] = struct{}{}
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	list := make([]int64, 0, len(ids))
+	for id := range ids {
+		list = append(list, id)
+	}
+	authors, err := s.users.BatchByIDs(ctx, list)
+	if err != nil {
+		return
+	}
+	for _, d := range dtos {
+		if a, ok := authors[d.UserID]; ok {
+			d.Author = a
+		}
+		if d.ReplyTo > 0 {
+			if a, ok := authors[d.ReplyTo]; ok {
+				d.ReplyToAuthor = a
+			}
+		}
+	}
+}
+
+func (s *service) CreateComment(ctx context.Context, userID, noteID int64, content string, parentID, replyTo int64) (*CommentDTO, error) {
 	if content == "" {
 		return nil, errs.ErrParam
 	}
+	if parentID > 0 {
+		parent, err := s.repos.Comment.FindByID(ctx, parentID)
+		if err != nil {
+			return nil, errs.ErrCommentNotFound
+		}
+		if parent.NoteID != noteID {
+			return nil, errs.ErrCommentNotFound
+		}
+		if parent.ParentID != 0 {
+			return nil, errs.ErrParam // 回复只能挂在顶级评论下
+		}
+	}
 	c := &Comment{
-		ID:      snowflake.NextID(),
-		NoteID:  noteID,
-		UserID:  userID,
-		Content: content,
+		ID: snowflake.NextID(), NoteID: noteID, UserID: userID,
+		Content: content, ParentID: parentID, ReplyTo: replyTo,
 	}
 	// 写为低频操作直接入库
 	if err := s.repos.Comment.Create(ctx, c); err != nil {
 		return nil, err
+	}
+	if parentID > 0 {
+		if err := s.repos.Comment.IncrementReplyCount(ctx, parentID, 1); err != nil {
+			return nil, err
+		}
 	}
 	// 原子更新 db 计数
 	if err := s.noteSvc.AddCountDelta(ctx, noteID, "comment_count", 1); err != nil {
@@ -167,14 +233,48 @@ func (s *service) CreateComment(ctx context.Context, userID, noteID int64, conte
 	if s.rdb != nil {
 		_ = s.rdb.Incr(ctx, counter.CountKey(counter.KindComment, noteID)).Err()
 	}
-	return c, nil
+	dto := s.toCommentDTO(c)
+	s.enrichComments(ctx, []*CommentDTO{dto})
+	return dto, nil
 }
 
-func (s *service) ListComments(ctx context.Context, noteID, cursor int64, size int) ([]*Comment, error) {
+func (s *service) ListComments(ctx context.Context, noteID, cursor int64, size int) ([]*CommentDTO, error) {
 	if size <= 0 || size > 50 {
 		size = 20
 	}
-	return s.repos.Comment.ListByNote(ctx, noteID, cursor, size)
+	cs, err := s.repos.Comment.ListTopLevelByNote(ctx, noteID, cursor, size)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*CommentDTO, 0, len(cs))
+	for _, c := range cs {
+		out = append(out, s.toCommentDTO(c))
+	}
+	s.enrichComments(ctx, out)
+	return out, nil
+}
+
+func (s *service) ListReplies(ctx context.Context, noteID, parentID, cursor int64, size int) ([]*CommentDTO, error) {
+	if size <= 0 || size > 50 {
+		size = 20
+	}
+	parent, err := s.repos.Comment.FindByID(ctx, parentID)
+	if err != nil {
+		return nil, errs.ErrCommentNotFound
+	}
+	if parent.NoteID != noteID {
+		return nil, errs.ErrCommentNotFound
+	}
+	cs, err := s.repos.Comment.ListReplies(ctx, parentID, cursor, size)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*CommentDTO, 0, len(cs))
+	for _, c := range cs {
+		out = append(out, s.toCommentDTO(c))
+	}
+	s.enrichComments(ctx, out)
+	return out, nil
 }
 
 // RebuildCounts: 关系表是唯一事实来源-Redis 丢失后从表中重建

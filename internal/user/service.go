@@ -21,7 +21,7 @@ type Service interface {
 	Register(ctx context.Context, username, password, nickname string) (*User, error)
 	Login(ctx context.Context, username, password string) (string, error)
 	Profile(ctx context.Context, id int64) (*User, error)
-	BatchFindByIDs(ctx context.Context, ids []int64) (map[int64]*Author, error)
+	BatchByIDs(ctx context.Context, ids []int64) (map[int64]*Author, error)
 	UpdateProfile(ctx context.Context, id int64, nickname, bio, avatarURL *string) (*User, error)
 	UploadAvatar(ctx context.Context, UserID int64, reader io.Reader, size int64, filename string) (string, error)
 }
@@ -82,7 +82,7 @@ func (s *service) Profile(ctx context.Context, id int64) (*User, error) {
 	}
 	return u, nil
 }
-func (s *service) BatchFindByIDs(ctx context.Context, ids []int64) (map[int64]*Author, error) {
+func (s *service) BatchByIDs(ctx context.Context, ids []int64) (map[int64]*Author, error) {
 	out := make(map[int64]*Author)
 	if len(ids) == 0 {
 		return out, nil

@@ -28,7 +28,10 @@ type CollectRepository interface {
 
 type CommentRepository interface {
 	Create(ctx context.Context, c *Comment) error
-	ListByNote(ctx context.Context, noteID, cursor int64, size int) ([]*Comment, error)
+	ListTopLevelByNote(ctx context.Context, noteID, cursor int64, size int) ([]*Comment, error)
+	ListReplies(ctx context.Context, parentID, cursor int64, size int) ([]*Comment, error)
+	FindByID(ctx context.Context, id int64) (*Comment, error)
+	IncrementReplyCount(ctx context.Context, parentID int64, delta int) error
 	CountByNote(ctx context.Context, noteID int64) (int64, error)
 }
 
@@ -117,14 +120,34 @@ func NewCommentRepository(db *gorm.DB) CommentRepository { return &gormCommentRe
 func (r *gormCommentRepo) Create(ctx context.Context, c *Comment) error {
 	return r.db.WithContext(ctx).Create(c).Error
 }
-func (r *gormCommentRepo) ListByNote(ctx context.Context, noteID, cursor int64, size int) ([]*Comment, error) {
+func (r *gormCommentRepo) ListTopLevelByNote(ctx context.Context, noteID, cursor int64, size int) ([]*Comment, error) {
 	var cs []*Comment
-	q := r.db.WithContext(ctx).Where("note_id = ? AND status = 0", noteID)
+	q := r.db.WithContext(ctx).Where("note_id = ? AND parent_id = 0 AND status = 0", noteID)
 	if cursor > 0 {
 		q = q.Where("id < ?", cursor)
 	}
 	err := q.Order("id DESC").Limit(size).Find(&cs).Error
 	return cs, err
+}
+func (r *gormCommentRepo) ListReplies(ctx context.Context, parentID, cursor int64, size int) ([]*Comment, error) {
+	var cs []*Comment
+	q := r.db.WithContext(ctx).Where("parent_id = ? AND status = 0", parentID)
+	if cursor > 0 {
+		q = q.Where("id > ?", cursor)
+	}
+	err := q.Order("id ASC").Limit(size).Find(&cs).Error
+	return cs, err
+}
+func (r *gormCommentRepo) FindByID(ctx context.Context, id int64) (*Comment, error) {
+	var c Comment
+	if err := r.db.WithContext(ctx).Where("status = 0").First(&c, id).Error; err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+func (r *gormCommentRepo) IncrementReplyCount(ctx context.Context, parentID int64, delta int) error {
+	return r.db.WithContext(ctx).Model(&Comment{}).Where("id = ?", parentID).
+		UpdateColumn("reply_count", gorm.Expr("reply_count + ?", delta)).Error
 }
 func (r *gormCommentRepo) CountByNote(ctx context.Context, noteID int64) (int64, error) {
 	var n int64

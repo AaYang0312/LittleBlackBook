@@ -3,14 +3,17 @@ package interaction
 import (
 	"context"
 	"errors"
+	"sort"
 	"testing"
 	"xbs/internal/pkg/db"
 	"xbs/internal/pkg/errs"
 	"xbs/internal/pkg/mq"
 	"xbs/internal/pkg/snowflake"
+	"xbs/internal/user"
 
 	"github.com/alicebob/miniredis/v2"
 	mysqlDriver "github.com/go-sql-driver/mysql"
+	"gorm.io/gorm"
 )
 
 type fakeFollowRepo struct {
@@ -50,7 +53,7 @@ func TestLikeIdempotent(t *testing.T) {
 		func(_ context.Context, ev mq.LikeEvent) error {
 			published = append(published, ev)
 			return nil
-		}, nil)
+		}, nil, nil)
 	ctx := context.Background()
 	if err := svc.Like(ctx, 1, 100); err != nil {
 		t.Fatal(err)
@@ -83,7 +86,7 @@ func TestLikeIdempotent(t *testing.T) {
 func TestFollowTargetNotExists(t *testing.T) {
 	repo := newFakeFollowRepo()
 	repo.insertErr = &mysqlDriver.MySQLError{Number: 1452} // 外键 violation
-	svc := NewService(&Repos{Follow: repo}, nil, nil, nil)
+	svc := NewService(&Repos{Follow: repo}, nil, nil, nil, nil)
 	err := svc.Follow(context.Background(), 1, 999)
 	if !errors.Is(err, errs.ErrUserNotFound) {
 		t.Fatalf("err=%v, want ErrUserNotFound", err)
@@ -92,7 +95,7 @@ func TestFollowTargetNotExists(t *testing.T) {
 
 func TestFollowIdempotent(t *testing.T) {
 	repo := newFakeFollowRepo()
-	svc := NewService(&Repos{Follow: repo}, nil, nil, nil)
+	svc := NewService(&Repos{Follow: repo}, nil, nil, nil, nil)
 	ctx := context.Background()
 	if err := svc.Follow(ctx, 1, 2); err != nil {
 		t.Fatal(err)
@@ -156,10 +159,22 @@ func (f *fakeNoteCounter) AddCountDelta(_ context.Context, _ int64, _ string, de
 func (f *fakeNoteCounter) ListAllIDs(context.Context) ([]int64, error)                 { return nil, nil }
 func (f *fakeNoteCounter) SetCounts(context.Context, int64, int64, int64, int64) error { return nil }
 
+type fakeUserLookup struct{ byID map[int64]*user.Author }
+
+func (f fakeUserLookup) BatchByIDs(_ context.Context, ids []int64) (map[int64]*user.Author, error) {
+	out := map[int64]*user.Author{}
+	for _, id := range ids {
+		if a, ok := f.byID[id]; ok {
+			out[id] = a
+		}
+	}
+	return out, nil
+}
+
 func TestApplyLikeEventExactlyOnce(t *testing.T) {
 	likes := newFakeLikeRepo()
 	nc := &fakeNoteCounter{}
-	svc := NewServiceForTest(&Repos{Like: likes}, nil, nil, nc)
+	svc := NewServiceForTest(&Repos{Like: likes}, nil, nil, nc, nil)
 	ctx := context.Background()
 	ev := mq.LikeEvent{
 		Kind:   "like",
@@ -190,20 +205,52 @@ func TestApplyLikeEventExactlyOnce(t *testing.T) {
 
 type fakeCommentRepo struct {
 	list []*Comment
+	byID map[int64]*Comment
 }
+
+func newFakeCommentRepo() *fakeCommentRepo { return &fakeCommentRepo{byID: map[int64]*Comment{}} }
 
 func (f *fakeCommentRepo) Create(_ context.Context, c *Comment) error {
 	f.list = append(f.list, c)
+	f.byID[c.ID] = c
 	return nil
 }
-func (f *fakeCommentRepo) ListByNote(_ context.Context, noteID, _ int64, _ int) ([]*Comment, error) {
+func (f *fakeCommentRepo) ListTopLevelByNote(_ context.Context, noteID, cursor int64, size int) ([]*Comment, error) {
 	var out []*Comment
 	for _, c := range f.list {
-		if c.NoteID == noteID {
+		if c.NoteID == noteID && c.ParentID == 0 && (cursor == 0 || c.ID < cursor) {
 			out = append(out, c)
 		}
 	}
+	if len(out) > size {
+		out = out[:size]
+	}
 	return out, nil
+}
+func (f *fakeCommentRepo) ListReplies(_ context.Context, parentID, cursor int64, size int) ([]*Comment, error) {
+	var out []*Comment
+	for _, c := range f.list {
+		if c.ParentID == parentID && (cursor == 0 || c.ID > cursor) {
+			out = append(out, c)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	if len(out) > size {
+		out = out[:size]
+	}
+	return out, nil
+}
+func (f *fakeCommentRepo) FindByID(_ context.Context, id int64) (*Comment, error) {
+	if c, ok := f.byID[id]; ok {
+		return c, nil
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+func (f *fakeCommentRepo) IncrementReplyCount(_ context.Context, parentID int64, delta int) error {
+	if c, ok := f.byID[parentID]; ok {
+		c.ReplyCount += int64(delta)
+	}
+	return nil
 }
 func (f *fakeCommentRepo) CountByNote(_ context.Context, noteID int64) (int64, error) {
 	var n int64
@@ -219,9 +266,9 @@ func TestCreateCommentIncrementsCount(t *testing.T) {
 	rdb := db.NewRedis(mr.Addr(), "", 0)
 	_ = snowflake.Init(1)
 	nc := &fakeNoteCounter{}
-	comments := &fakeCommentRepo{}
-	svc := NewServiceForTest(&Repos{Comment: comments}, rdb, nil, nc)
-	c, err := svc.CreateComment(context.Background(), 1, 100, "good")
+	comments := newFakeCommentRepo()
+	svc := NewServiceForTest(&Repos{Comment: comments}, rdb, nil, nc, nil)
+	c, err := svc.CreateComment(context.Background(), 1, 100, "good", 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +282,7 @@ func TestCreateCommentIncrementsCount(t *testing.T) {
 	if cnt != 1 {
 		t.Fatalf("redis comment count=%d", cnt)
 	}
-	if _, err := svc.CreateComment(context.Background(), 1, 100, ""); !errors.Is(err, errs.ErrParam) {
+	if _, err := svc.CreateComment(context.Background(), 1, 100, "", 0, 0); !errors.Is(err, errs.ErrParam) {
 		t.Fatalf("empty content should fail")
 	}
 }
@@ -277,7 +324,7 @@ func TestRebuildCounts(t *testing.T) {
 	likes.pairs[[2]int64{2, 100}] = true
 	comments := &fakeCommentRepo{list: []*Comment{{NoteID: 100, Content: "x"}}}
 	nc := &fakeNoteCounterWithIDs{ids: []int64{100}}
-	svc := NewServiceForTest(&Repos{Like: likes, Comment: comments, Collect: newFakeLikeRepoAdapter()}, rdb, nil, nc)
+	svc := NewServiceForTest(&Repos{Like: likes, Comment: comments, Collect: newFakeLikeRepoAdapter()}, rdb, nil, nc, nil)
 	if err := svc.RebuildCounts(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -290,5 +337,100 @@ func TestRebuildCounts(t *testing.T) {
 	}
 	if nc.setCalls != 1 || nc.lastLike != 2 || nc.lastComment != 1 {
 		t.Fatalf("SetCalls=%d like=%d comment=%d", nc.setCalls, nc.lastLike, nc.lastComment)
+	}
+}
+
+func TestCreateReplyValidation(t *testing.T) {
+	_ = snowflake.Init(1)
+	mr := miniredis.RunT(t)
+	rdb := db.NewRedis(mr.Addr(), "", 0)
+	comments := newFakeCommentRepo()
+	nc := &fakeNoteCounter{}
+	svc := NewServiceForTest(&Repos{Comment: comments}, rdb, nil, nc, nil)
+	ctx := context.Background()
+	top, err := svc.CreateComment(ctx, 1, 100, "top", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.CreateComment(ctx, 2, 100, "r", 999, 0); !errors.Is(err, errs.ErrCommentNotFound) {
+		t.Fatalf("want ErrCommentNotFound, got %v", err)
+	}
+	if _, err := svc.CreateComment(ctx, 2, 200, "r", top.ID, 0); !errors.Is(err, errs.ErrCommentNotFound) {
+		t.Fatalf("want ErrCommentNotFound for note mismatch, got %v", err)
+	}
+	r, err := svc.CreateComment(ctx, 2, 100, "reply", top.ID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.ParentID != top.ID {
+		t.Fatalf("reply parent_id=%d", r.ParentID)
+	}
+	if len(nc.deltas) != 2 {
+		t.Fatalf("note deltas=%v (want 2: top+reply)", nc.deltas)
+	}
+	parent, _ := comments.FindByID(ctx, top.ID)
+	if parent.ReplyCount != 1 {
+		t.Fatalf("reply_count=%d", parent.ReplyCount)
+	}
+	if _, err := svc.CreateComment(ctx, 3, 100, "r2", r.ID, 0); !errors.Is(err, errs.ErrParam) {
+		t.Fatalf("want ErrParam for replying to a reply, got %v", err)
+	}
+}
+
+func TestListCommentsTopLevelOnly(t *testing.T) {
+	_ = snowflake.Init(1)
+	comments := newFakeCommentRepo()
+	nc := &fakeNoteCounter{}
+	svc := NewServiceForTest(&Repos{Comment: comments}, nil, nil, nc, nil)
+	ctx := context.Background()
+	top, _ := svc.CreateComment(ctx, 1, 100, "top", 0, 0)
+	svc.CreateComment(ctx, 2, 100, "reply", top.ID, 0)
+	list, err := svc.ListComments(ctx, 100, 0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].ID != top.ID || list[0].ReplyCount != 1 {
+		t.Fatalf("top-level list=%+v", list)
+	}
+}
+
+func TestListReplies(t *testing.T) {
+	_ = snowflake.Init(1)
+	comments := newFakeCommentRepo()
+	nc := &fakeNoteCounter{}
+	svc := NewServiceForTest(&Repos{Comment: comments}, nil, nil, nc, nil)
+	ctx := context.Background()
+	top, _ := svc.CreateComment(ctx, 1, 100, "top", 0, 0)
+	r1, _ := svc.CreateComment(ctx, 2, 100, "r1", top.ID, 1)
+	r2, _ := svc.CreateComment(ctx, 3, 100, "r2", top.ID, 2)
+	if _, err := svc.ListReplies(ctx, 100, 999, 0, 20); !errors.Is(err, errs.ErrCommentNotFound) {
+		t.Fatalf("want ErrCommentNotFound, got %v", err)
+	}
+	if _, err := svc.ListReplies(ctx, 200, top.ID, 0, 20); !errors.Is(err, errs.ErrCommentNotFound) {
+		t.Fatalf("want ErrCommentNotFound for note mismatch, got %v", err)
+	}
+	reps, err := svc.ListReplies(ctx, 100, top.ID, 0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reps) != 2 || reps[0].ID != r1.ID || reps[1].ID != r2.ID {
+		t.Fatalf("replies not ascending: %+v", reps)
+	}
+}
+
+func TestCommentAuthorEnrichment(t *testing.T) {
+	_ = snowflake.Init(1)
+	comments := newFakeCommentRepo()
+	nc := &fakeNoteCounter{}
+	lookup := fakeUserLookup{byID: map[int64]*user.Author{1: {ID: 1, Nickname: "小红"}, 2: {ID: 2, Nickname: "小明"}}}
+	svc := NewServiceForTest(&Repos{Comment: comments}, nil, nil, nc, lookup)
+	ctx := context.Background()
+	top, _ := svc.CreateComment(ctx, 1, 100, "top", 0, 0)
+	if top.Author == nil || top.Author.Nickname != "小红" {
+		t.Fatalf("top author not enriched: %+v", top.Author)
+	}
+	r, _ := svc.CreateComment(ctx, 2, 100, "reply", top.ID, 1)
+	if r.Author == nil || r.Author.Nickname != "小明" || r.ReplyToAuthor == nil || r.ReplyToAuthor.Nickname != "小红" {
+		t.Fatalf("reply authors not enriched: author=%+v replyTo=%+v", r.Author, r.ReplyToAuthor)
 	}
 }

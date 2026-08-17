@@ -114,7 +114,9 @@ func (h *Handler) Uncollect(c *gin.Context) {
 }
 
 type commentReq struct {
-	Content string `json:"content" binding:"required"`
+	Content  string `json:"content" binding:"required"`
+	ParentID int64  `json:"parent_id"`
+	ReplyTo  int64  `json:"reply_to"`
 }
 
 // CreateComment 评论笔记
@@ -134,7 +136,7 @@ func (h *Handler) CreateComment(c *gin.Context) {
 		response.Fail(c, errs.ErrParam)
 		return
 	}
-	cm, err := h.svc.CreateComment(c.Request.Context(), middleware.CurrentUserID(c), noteID, req.Content)
+	cm, err := h.svc.CreateComment(c.Request.Context(), middleware.CurrentUserID(c), noteID, req.Content, req.ParentID, req.ReplyTo)
 	if err != nil {
 		response.Fail(c, err)
 		return
@@ -163,6 +165,30 @@ func (h *Handler) ListComments(c *gin.Context) {
 	}
 	response.OK(c, cs)
 }
+// ListReplies 展开回复
+// @Summary 评论回复列表（游标分页，时间正序）
+// @Tags interaction
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "笔记ID"
+// @Param cid path int true "顶级评论ID"
+// @Param cursor query int false "游标（已加载最后一条回复id）"
+// @Param size query int false "每页条数"
+// @Success 200 {object} response.body
+// @Router /notes/{id}/comments/{cid}/replies [get]
+func (h *Handler) ListReplies(c *gin.Context) {
+	noteID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	cid, _ := strconv.ParseInt(c.Param("cid"), 10, 64)
+	cursor, _ := strconv.ParseInt(c.Query("cursor"), 10, 64)
+	size, _ := strconv.Atoi(c.DefaultQuery("size", "20"))
+	cs, err := h.svc.ListReplies(c.Request.Context(), noteID, cid, cursor, size)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, cs)
+}
+
 // RebuildCounts 重建计数
 // @Summary 重建计数（内网接口）
 // @Tags interaction
