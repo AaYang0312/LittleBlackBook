@@ -46,9 +46,13 @@ CREATE TABLE IF NOT EXISTS comments (
     note_id BIGINT NOT NULL,
     user_id BIGINT NOT NULL,
     content VARCHAR(512) NOT NULL,
+    parent_id BIGINT NOT NULL DEFAULT 0,
+    reply_count BIGINT NOT NULL DEFAULT 0,
+    reply_to BIGINT NOT NULL DEFAULT 0,
     status TINYINT NOT NULL DEFAULT 0,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_note_created (note_id, created_at)
+    INDEX idx_note_created (note_id, created_at),
+    INDEX idx_parent (parent_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS follows (
